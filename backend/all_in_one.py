@@ -162,16 +162,19 @@ def submit_homework(request: SubmitRequest):
         
         if analysis_result["judge_result"] == "correct":
             if not knowledge_id:
-                return SubmitResponse(
-                    status="success",
-                    data={
-                        "judge_result": "correct",
-                        "step_feedback": analysis_result["step_feedback"],
-                        "master_level": 1.0,
-                        "next_action": "guide",
-                        "warning": "无法确定题目对应的知识点，跳过状态更新"
-                    }
-                )
+                question = analysis_result.get("original_question", "")
+                if any(w in question for w in ["加", "一共", "总共", "合计"]):
+                    knowledge_id = "K035"
+                elif any(w in question for w in ["减", "剩下", "还剩", "借出"]):
+                    knowledge_id = "K037"
+                elif "乘" in question:
+                    knowledge_id = "K082"
+                elif "周长" in question:
+                    knowledge_id = "K087"
+                elif "面积" in question:
+                    knowledge_id = "K105"
+                else:
+                    knowledge_id = "K252"
             
             state_result = update_state(request.student_id, knowledge_id, True, analysis_result["confidence"])
             return SubmitResponse(
@@ -439,9 +442,9 @@ def analyze_error(analysis_result: dict) -> dict:
     else:
         error_tags.append({"error_id": "M-001", **ERROR_TAG_BANK["M-001"], "confidence": 0.85})
     
-    if "加" in question:
+    if any(w in question for w in ["加", "一共", "总共", "合计"]):
         knowledge_id = "K035"
-    elif "减" in question:
+    elif any(w in question for w in ["减", "剩下", "还剩", "借出"]):
         knowledge_id = "K037"
     elif "乘" in question:
         knowledge_id = "K082"
@@ -475,8 +478,13 @@ def analyze_error(analysis_result: dict) -> dict:
         cursor.execute('INSERT INTO mistake_case_knowledge (mistake_case_id, knowledge_id, knowledge_weight) VALUES (?, ?, ?)', (mistake_case_id, knowledge_id, 1.0))
         conn.commit()
     
-    knowledge_data = fetch_knowledge_from_graph(knowledge_id)
-    knowledge_scope = knowledge_data.get("title", "") if knowledge_data else ""
+    knowledge_scope = ""
+    with get_db() as conn2:
+        cursor2 = conn2.cursor()
+        cursor2.execute('SELECT knowledge_scope FROM knowledge WHERE knowledge_id = ?', (knowledge_id,))
+        row2 = cursor2.fetchone()
+        if row2:
+            knowledge_scope = row2["knowledge_scope"] or ""
     
     return {
         "error_tags": error_tags,
@@ -487,15 +495,17 @@ def analyze_error(analysis_result: dict) -> dict:
     }
 
 def retrieve_knowledge(knowledge_id: str) -> dict:
-    knowledge = fetch_knowledge_from_graph(knowledge_id)
-    if not knowledge:
-        raise HTTPException(status_code=404, detail=f"知识点 {knowledge_id} 不存在")
-    
-    return {
-        "knowledge_explanation": knowledge.get("content", ""),
-        "difficulty": knowledge.get("difficulty", "medium"),
-        "standard_solution": ""
-    }
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT knowledge_scope, difficulty FROM knowledge WHERE knowledge_id = ?', (knowledge_id,))
+        row = cursor.fetchone()
+        if not row:
+            return {"knowledge_explanation": "", "difficulty": "medium", "standard_solution": ""}
+        return {
+            "knowledge_explanation": row["knowledge_scope"] or "",
+            "difficulty": row["difficulty"] or "medium",
+            "standard_solution": ""
+        }
 
 def generate_teaching(error_analysis_result: dict, master_level: float, analysis_result: dict) -> dict:
     knowledge_id = error_analysis_result["knowledge_id"]
@@ -616,10 +626,11 @@ def generate_review(student_id: str, knowledge_id: str, knowledge_mastery_id: st
         cursor = conn.cursor()
         
         for stage in ["Day1", "Day3", "Day7"]:
-            cursor.execute('INSERT INTO review_plan (review_plan_id, knowledge_mastery_id, review_stage, status, created_at) VALUES (?, ?, ?, ?, ?)', (review_plan_id, knowledge_mastery_id, stage, "pending", datetime.now().isoformat()))
+            stage_plan_id = generate_id("RP")
+            cursor.execute('INSERT INTO review_plan (review_plan_id, knowledge_mastery_id, review_stage, status, created_at) VALUES (?, ?, ?, ?, ?)', (stage_plan_id, knowledge_mastery_id, stage, "pending", datetime.now().isoformat()))
             
             push_record_id = generate_id("PR")
-            cursor.execute('INSERT INTO push_record (push_record_id, review_plan_id, push_date, push_stage, status) VALUES (?, ?, ?, ?, ?)', (push_record_id, review_plan_id, stage_dates[stage], stage.lower(), "pending"))
+            cursor.execute('INSERT INTO push_record (push_record_id, review_plan_id, push_date, push_stage, status) VALUES (?, ?, ?, ?, ?)', (push_record_id, stage_plan_id, stage_dates[stage], stage.lower(), "pending"))
         
         conn.commit()
     
