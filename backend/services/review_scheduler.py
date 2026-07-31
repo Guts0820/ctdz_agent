@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import sqlite3
 import time
-from mastery_utils import calculate_mastery
+from mastery_utils import calculate_mastery, calculate_advanced, load_evidence
 from id_utils import generate_id
 
 app = FastAPI(title="Review Scheduler", version="1.0.0")
@@ -164,7 +164,18 @@ def complete_review_task(push_record_id: str, is_correct: bool):
             wrong_count += 1
             correct_count = 0
         
-        master_level, mastery_status = calculate_mastery(correct_count, wrong_count)
+        # 尝试高级算法
+        evidence = load_evidence(row["student_id"], row["knowledge_id"], DATABASE)
+        if len(evidence) >= 2:
+            result = calculate_advanced(
+                student_id=0,
+                knowledge_point_id=row["knowledge_id"],
+                evidence=evidence,
+            )
+            master_level = result["mastery"]
+            mastery_status = result["mastery_status"]
+        else:
+            master_level, mastery_status = calculate_mastery(correct_count, wrong_count)
         
         cursor.execute('''
             UPDATE knowledge_mastery

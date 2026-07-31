@@ -9,7 +9,7 @@ from pydantic import BaseModel
 import sqlite3
 import sys
 sys.path.insert(0, 'backend/services')
-from mastery_utils import calculate_mastery
+from mastery_utils import calculate_mastery, calculate_advanced, load_evidence
 from id_utils import generate_id
 
 USE_REAL_OCR = False
@@ -553,9 +553,24 @@ def update_state(student_id: str, knowledge_id: str, is_correct: bool, confidenc
             wrong_count += 1
             correct_count = 0
         
-        master_level, mastery_status = calculate_mastery(correct_count, wrong_count)
+        # 尝试高级算法：从 answer_history 加载证据
+        evidence = load_evidence(student_id, knowledge_id, DATABASE)
+        if len(evidence) >= 2:
+            result = calculate_advanced(
+                student_id=0,
+                knowledge_point_id=knowledge_id,
+                evidence=evidence,
+            )
+            master_level = result["mastery"]
+            mastery_status = result["mastery_status"]
+        else:
+            master_level, mastery_status = calculate_mastery(correct_count, wrong_count)
         
-        if master_level < 0.4:
+        if mastery_status == "mastered":
+            next_action = "complete"
+        elif mastery_status == "weak":
+            next_action = "teacher_intervention"
+        elif master_level < 0.4:
             next_action = "basic_practice"
         elif 0.4 <= master_level <= 0.8:
             next_action = "practice"
