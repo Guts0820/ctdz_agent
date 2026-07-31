@@ -1,4 +1,3 @@
-import hashlib
 import json
 from datetime import datetime
 from typing import List, Optional
@@ -19,12 +18,15 @@ except ImportError:
             super().__init__(detail)
 from pydantic import BaseModel
 import sqlite3
+from id_utils import generate_id
 
 app = FastAPI(title="Analysis Service", version="1.0.0")
 
 DATABASE = "backend/database/example_db.db"
 
 class AnalysisRequest(BaseModel):
+    student_id: str
+    question_id: Optional[str] = None
     image: Optional[str] = None
     original_question: Optional[str] = None
     student_write: Optional[str] = None
@@ -42,14 +44,13 @@ class AnalysisResponse(BaseModel):
     original_question: str
     student_write: str
     text_status: str
+    student_id: str
+    question_id: Optional[str] = None
 
 def get_db():
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
     return conn
-
-def generate_id(prefix: str) -> str:
-    return f"{prefix}-{hashlib.md5(f'{datetime.now()}{hash(prefix)}'.encode()).hexdigest()[:8].upper()}"
 
 @app.post("/internal/api/v1/analysis/process", response_model=AnalysisResponse)
 def process_analysis(request: AnalysisRequest):
@@ -70,6 +71,16 @@ def process_analysis(request: AnalysisRequest):
     
     with get_db() as conn:
         cursor = conn.cursor()
+        
+        question_id = request.question_id
+        if not question_id and request.original_question:
+            cursor.execute('''
+                SELECT question_id FROM question WHERE question_description = ?
+            ''', (request.original_question,))
+            row = cursor.fetchone()
+            if row:
+                question_id = row["question_id"]
+        
         cursor.execute('''
             INSERT INTO answer_history (
                 answer_history_id, student_id, question_id, submit_type, submit_count,
@@ -79,8 +90,8 @@ def process_analysis(request: AnalysisRequest):
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             generate_id("AH"),
-            "",
-            "",
+            request.student_id,
+            question_id,
             "首次错题",
             1,
             process_result["original_question"],
@@ -98,6 +109,8 @@ def process_analysis(request: AnalysisRequest):
         ))
         conn.commit()
     
+    process_result["student_id"] = request.student_id
+    process_result["question_id"] = request.question_id
     return AnalysisResponse(**process_result)
 
 def simulate_ocr(request: AnalysisRequest) -> dict:

@@ -1,4 +1,3 @@
-import hashlib
 import json
 from datetime import datetime, timedelta
 from typing import Optional
@@ -6,6 +5,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import sqlite3
 import time
+from mastery_utils import calculate_mastery
+from id_utils import generate_id
 
 app = FastAPI(title="Review Scheduler", version="1.0.0")
 
@@ -15,9 +16,6 @@ def get_db():
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
     return conn
-
-def generate_id(prefix: str) -> str:
-    return f"{prefix}-{hashlib.md5(f'{datetime.now()}{hash(prefix)}'.encode()).hexdigest()[:8].upper()}"
 
 class ReviewTask(BaseModel):
     review_plan_id: str
@@ -212,18 +210,6 @@ def complete_review_task(push_record_id: str, is_correct: bool):
         "correct_count": correct_count,
         "wrong_count": wrong_count
     }
-
-def calculate_mastery(correct_count: int, wrong_count: int) -> tuple:
-    if correct_count >= 2:
-        return 1.00, "mastered"
-    elif wrong_count >= 2:
-        return 0.00, "weak"
-    elif correct_count == 0 and wrong_count == 0:
-        return 0.00, "pending"
-    else:
-        total = correct_count + wrong_count
-        master_level = (correct_count * 0.5) / total
-        return round(master_level, 2), "pending"
 
 @app.get("/health")
 def health_check():

@@ -1,7 +1,9 @@
 import sqlite3
 import os
+import csv
 
 DATABASE = "backend/database/example_db.db"
+KNOWLEDGE_CSV = "backend/database/knowledge_points.csv"
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS students (
@@ -225,6 +227,28 @@ INITIAL_DATA = {
     ]
 }
 
+def load_knowledge_from_csv():
+    knowledge_data = []
+    if os.path.exists(KNOWLEDGE_CSV):
+        with open(KNOWLEDGE_CSV, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                semester = row.get('semester', '')
+                unit = f"{row['grade']}年级{semester}" if semester else ''
+                knowledge_data.append((
+                    row['knowledge_point_id'],
+                    row['description'],
+                    row['description'],
+                    row['grade'],
+                    '人教版',
+                    unit,
+                    '',
+                    '',
+                    'medium',
+                    1
+                ))
+    return knowledge_data
+
 def init_database():
     os.makedirs(os.path.dirname(DATABASE), exist_ok=True)
     
@@ -242,6 +266,12 @@ def init_database():
     }
     
     for table, data in INITIAL_DATA.items():
+        if table == 'knowledge':
+            csv_data = load_knowledge_from_csv()
+            if csv_data:
+                data = csv_data
+                print(f"Loading knowledge from CSV: {len(data)} records")
+        
         cursor.execute(f'SELECT COUNT(*) FROM {table}')
         count = cursor.fetchone()[0]
         if count == 0:
@@ -254,7 +284,7 @@ def init_database():
     
     print(f"Database initialized successfully at {DATABASE}")
     print("Tables created: students, knowledge, error_bank, question, question_knowledge_mapping, answer_history, mistake_case, mistake_case_error, mistake_case_knowledge, teaching_content, knowledge_mastery, review_plan, push_record, frequency_limit")
-    print("Initial data loaded for: knowledge(12), error_bank(17), students(3), question(5), question_knowledge_mapping(5)")
+    print("Initial data loaded for: knowledge(255+), error_bank(17), students(3), question(5), question_knowledge_mapping(5)")
 
 if __name__ == "__main__":
     init_database()

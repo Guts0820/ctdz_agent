@@ -1,18 +1,23 @@
-import hashlib
 import json
 import base64
 import io
+import requests
 from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 import sqlite3
+import sys
+sys.path.insert(0, 'backend/services')
+from mastery_utils import calculate_mastery
+from id_utils import generate_id
 
 USE_REAL_OCR = False
 
 app = FastAPI(title="AI Math Error Correction System - All in One", version="1.0.0")
 
 DATABASE = "backend/database/example_db.db"
+KG_SERVICE_URL = "http://localhost:8007"
 
 if USE_REAL_OCR:
     try:
@@ -76,8 +81,20 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-def generate_id(prefix: str) -> str:
-    return f"{prefix}-{hashlib.md5(f'{datetime.now()}{hash(prefix)}'.encode()).hexdigest()[:8].upper()}"
+def lookup_knowledge_id(question_id: Optional[str]) -> Optional[str]:
+    if not question_id:
+        return None
+    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT knowledge_id FROM question_knowledge_mapping WHERE question_id = ?
+        ''', (question_id,))
+        row = cursor.fetchone()
+        if row:
+            return row["knowledge_id"]
+    
+    return None
 
 ERROR_TAG_BANK = {
     "C-001": {"level1": "计算", "level2": "口算与基本运算", "level3": "进位加法中十位漏加进位1"},
@@ -88,29 +105,18 @@ ERROR_TAG_BANK = {
     "M-001": {"level1": "粗心", "level2": "抄错数字", "level3": "粗心错误"}
 }
 
-KNOWLEDGE_BASE = {
-    "G-N-2-005": {
-        "scope": "100以内进位加法",
-        "explanation": "两位数加两位数时，个位相加满十要向十位进1。计算步骤：1. 相同数位对齐；2. 从个位加起；3. 个位相加满十，向十位进1；4. 十位相加时要加上进位的1。",
-        "difficulty": "medium",
-        "standard_solution": "以25+38为例：个位5+8=13，写3进1；十位2+3+1=6；结果为63。",
-        "common_errors": "1. 个位相加满十忘记进位；2. 十位相加时忘记加进位的1；3. 数位没有对齐。"
-    },
-    "G-N-2-006": {
-        "scope": "100以内退位减法",
-        "explanation": "两位数减两位数时，个位不够减要从十位退1当10。计算步骤：1. 相同数位对齐；2. 从个位减起；3. 个位不够减，从十位退1；4. 十位相减时要减去退走的1。",
-        "difficulty": "medium",
-        "standard_solution": "以52-28为例：个位2-8不够减，从十位退1得12-8=4；十位5-1-2=2；结果为24。",
-        "common_errors": "1. 个位不够减忘记退位；2. 十位相减时忘记减退位的1；3. 退位后个位计算错误。"
-    },
-    "G-N-3-003": {"scope": "两位数乘一位数", "explanation": "两位数乘一位数的乘法运算", "difficulty": "hard", "standard_solution": "", "common_errors": ""},
-    "G-C-3-001": {"scope": "长方形和正方形的周长", "explanation": "封闭图形一周的长度", "difficulty": "medium", "standard_solution": "", "common_errors": ""},
-    "G-C-3-002": {"scope": "长方形和正方形的面积", "explanation": "物体表面或封闭图形的大小", "difficulty": "hard", "standard_solution": "", "common_errors": ""},
-    "G-N-1-001": {"scope": "数与代数", "explanation": "数学基础领域", "difficulty": "easy", "standard_solution": "", "common_errors": ""}
-}
+def fetch_knowledge_from_graph(knowledge_id: str) -> dict:
+    try:
+        response = requests.get(f"{KG_SERVICE_URL}/api/knowledge_points/{knowledge_id}", timeout=5)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException:
+        return None
 
 TEACHING_TEMPLATES = {
-    "G-N-2-005": {
+    "K035": {
         "basic": {"explain": "我们来学习两位数加两位数的进位加法。当两个数相加时，个位上的数字加起来如果等于或超过10，就要向十位进1。比如25+38，个位5+8=13，我们在个位写3，然后向十位进1，十位上2+3再加上进位的1等于6，所以结果是63。", "hints": ["先算个位，5+8等于多少？", "个位满十了吗？满十要怎么办？", "十位上的2+3还要加什么？"], "practice": [{"q": "18+25=？", "a": "43"}, {"q": "36+17=？", "a": "53"}]},
         "standard": {"explain": "两位数加两位数进位加法的计算方法：1. 相同数位对齐；2. 从个位加起；3. 个位相加满十，向十位进1；4. 十位相加时要记得加上进位的1。", "hints": ["检查一下个位相加是否满十", "十位相加时有没有忘记加进位"], "practice": [{"q": "45+28=？", "a": "73"}, {"q": "56+37=？", "a": "93"}]},
         "advanced": {"explain": "你已经掌握了进位加法的基本方法，继续加油！记住进位标记很重要哦。", "hints": ["你能说说进位加法的关键步骤吗？"], "practice": []}
@@ -124,6 +130,7 @@ TEACHING_TEMPLATES = {
 
 class SubmitRequest(BaseModel):
     student_id: str
+    question_id: Optional[str] = None
     image: Optional[str] = None
     original_question: Optional[str] = None
     student_write: Optional[str] = None
@@ -150,13 +157,29 @@ def submit_homework(request: SubmitRequest):
                 }
             )
         
+        question_id = request.question_id or analysis_result.get("question_id")
+        knowledge_id = lookup_knowledge_id(question_id)
+        
         if analysis_result["judge_result"] == "correct":
-            state_result = update_state(request.student_id, "G-N-2-005", True, analysis_result["confidence"])
+            if not knowledge_id:
+                return SubmitResponse(
+                    status="success",
+                    data={
+                        "judge_result": "correct",
+                        "step_feedback": analysis_result["step_feedback"],
+                        "master_level": 1.0,
+                        "next_action": "guide",
+                        "warning": "无法确定题目对应的知识点，跳过状态更新"
+                    }
+                )
+            
+            state_result = update_state(request.student_id, knowledge_id, True, analysis_result["confidence"])
             return SubmitResponse(
                 status="success",
                 data={
                     "judge_result": "correct",
                     "step_feedback": analysis_result["step_feedback"],
+                    "knowledge_id": knowledge_id,
                     "master_level": state_result["master_level"],
                     "next_action": state_result["next_action"]
                 }
@@ -164,13 +187,16 @@ def submit_homework(request: SubmitRequest):
         
         error_analysis_result = analyze_error(analysis_result)
         
-        knowledge_result = retrieve_knowledge(error_analysis_result["knowledge_id"])
+        if not knowledge_id:
+            knowledge_id = error_analysis_result.get("knowledge_id", "K252")
         
-        state_before = update_state(request.student_id, error_analysis_result["knowledge_id"], False, error_analysis_result["total_confidence"])
+        knowledge_result = retrieve_knowledge(knowledge_id)
         
-        frequency_result = check_frequency(request.student_id, error_analysis_result["knowledge_id"])
+        frequency_result = check_frequency(request.student_id, knowledge_id)
         
         if not frequency_result["push_permission"]:
+            state_result = update_state(request.student_id, knowledge_id, False, error_analysis_result["total_confidence"])
+            
             return SubmitResponse(
                 status="success",
                 data={
@@ -179,18 +205,18 @@ def submit_homework(request: SubmitRequest):
                     "error_tags": error_analysis_result["error_tags"],
                     "knowledge_scope": error_analysis_result["knowledge_scope"],
                     "explanation": knowledge_result["knowledge_explanation"],
-                    "master_level": state_before["master_level"],
+                    "master_level": state_result["master_level"],
                     "next_action": "frequency_limit_exceeded",
                     "frequency_info": frequency_result
                 }
             )
         
+        state_before = update_state(request.student_id, knowledge_id, False, error_analysis_result["total_confidence"])
+        
         teaching_result = generate_teaching(error_analysis_result, state_before["master_level"], analysis_result)
         
-        state_after = update_state(request.student_id, error_analysis_result["knowledge_id"], False, error_analysis_result["total_confidence"])
-        
-        if state_after["should_generate_review"]:
-            review_result = generate_review(request.student_id, error_analysis_result["knowledge_id"], state_after["knowledge_mastery_id"], state_after["master_level"])
+        if state_before["should_generate_review"]:
+            review_result = generate_review(request.student_id, knowledge_id, state_before["knowledge_mastery_id"], state_before["master_level"])
         else:
             review_result = None
         
@@ -206,7 +232,7 @@ def submit_homework(request: SubmitRequest):
                 "confidence": analysis_result["confidence"],
                 "ocr_text": analysis_result.get("ocr_text", ""),
                 "error_tags": error_analysis_result["error_tags"],
-                "knowledge_id": error_analysis_result["knowledge_id"],
+                "knowledge_id": knowledge_id,
                 "knowledge_scope": error_analysis_result["knowledge_scope"],
                 "knowledge_explanation": knowledge_result["knowledge_explanation"],
                 "difficulty": knowledge_result["difficulty"],
@@ -215,11 +241,11 @@ def submit_homework(request: SubmitRequest):
                 "hints": teaching_result["hints"],
                 "practice_list": teaching_result["practice_list"],
                 "teaching_mode": teaching_result["teaching_mode"],
-                "master_level": state_after["master_level"],
-                "next_action": state_after["next_action"],
-                "correct_count": state_after["correct_count"],
-                "wrong_count": state_after["wrong_count"],
-                "mastery_status": state_after["mastery_status"],
+                "master_level": state_before["master_level"],
+                "next_action": state_before["next_action"],
+                "correct_count": state_before["correct_count"],
+                "wrong_count": state_before["wrong_count"],
+                "mastery_status": state_before["mastery_status"],
                 "review_plan": review_result
             }
         )
@@ -230,6 +256,8 @@ def submit_homework(request: SubmitRequest):
 def process_analysis(request: SubmitRequest) -> dict:
     question = request.original_question or ""
     answer = request.student_write or ""
+    student_id = request.student_id
+    question_id = request.question_id
     
     if request.image:
         try:
@@ -251,7 +279,9 @@ def process_analysis(request: SubmitRequest) -> dict:
                     "confidence": 0.0,
                     "original_question": "",
                     "student_write": "",
-                    "ocr_text": ""
+                    "ocr_text": "",
+                    "student_id": student_id,
+                    "question_id": question_id
                 }
             
             ocr_text = ocr_result["text"]
@@ -273,7 +303,9 @@ def process_analysis(request: SubmitRequest) -> dict:
                     "confidence": ocr_result["confidence"],
                     "original_question": question,
                     "student_write": answer,
-                    "ocr_text": ocr_text
+                    "ocr_text": ocr_text,
+                    "student_id": student_id,
+                    "question_id": question_id
                 }
         except Exception as e:
             return {
@@ -286,7 +318,9 @@ def process_analysis(request: SubmitRequest) -> dict:
                 "confidence": 0.0,
                 "original_question": question,
                 "student_write": answer,
-                "ocr_text": ""
+                "ocr_text": "",
+                "student_id": student_id,
+                "question_id": question_id
             }
     
     if not question:
@@ -302,7 +336,9 @@ def process_analysis(request: SubmitRequest) -> dict:
             "core_error_type": "未作答",
             "confidence": 0.95,
             "original_question": question,
-            "student_write": answer
+            "student_write": answer,
+            "student_id": student_id,
+            "question_id": question_id
         }
     
     is_copy = "63" in answer and len(answer) <= 10 and "+" not in answer
@@ -317,7 +353,9 @@ def process_analysis(request: SubmitRequest) -> dict:
             "core_error_type": "疑似抄袭",
             "confidence": 0.90,
             "original_question": question,
-            "student_write": answer
+            "student_write": answer,
+            "student_id": student_id,
+            "question_id": question_id
         }
     
     if "25" in question and "38" in question:
@@ -331,7 +369,9 @@ def process_analysis(request: SubmitRequest) -> dict:
                 "core_error_type": "",
                 "confidence": 0.95,
                 "original_question": question,
-                "student_write": answer
+                "student_write": answer,
+                "student_id": student_id,
+                "question_id": question_id
             }
         elif "53" in answer:
             return {
@@ -343,7 +383,9 @@ def process_analysis(request: SubmitRequest) -> dict:
                 "core_error_type": "计算失误",
                 "confidence": 0.92,
                 "original_question": question,
-                "student_write": answer
+                "student_write": answer,
+                "student_id": student_id,
+                "question_id": question_id
             }
         else:
             return {
@@ -355,7 +397,9 @@ def process_analysis(request: SubmitRequest) -> dict:
                 "core_error_type": "计算失误",
                 "confidence": 0.85,
                 "original_question": question,
-                "student_write": answer
+                "student_write": answer,
+                "student_id": student_id,
+                "question_id": question_id
             }
     
     return {
@@ -367,7 +411,9 @@ def process_analysis(request: SubmitRequest) -> dict:
         "core_error_type": "未知",
         "confidence": 0.50,
         "original_question": question,
-        "student_write": answer
+        "student_write": answer,
+        "student_id": student_id,
+        "question_id": question_id
     }
 
 def analyze_error(analysis_result: dict) -> dict:
@@ -394,24 +440,34 @@ def analyze_error(analysis_result: dict) -> dict:
         error_tags.append({"error_id": "M-001", **ERROR_TAG_BANK["M-001"], "confidence": 0.85})
     
     if "加" in question:
-        knowledge_id = "G-N-2-005"
+        knowledge_id = "K035"
     elif "减" in question:
-        knowledge_id = "G-N-2-006"
+        knowledge_id = "K037"
     elif "乘" in question:
-        knowledge_id = "G-N-3-003"
+        knowledge_id = "K082"
     elif "周长" in question:
-        knowledge_id = "G-C-3-001"
+        knowledge_id = "K087"
     elif "面积" in question:
-        knowledge_id = "G-C-3-002"
+        knowledge_id = "K105"
     else:
-        knowledge_id = "G-N-1-001"
+        knowledge_id = "K252"
     
     total_confidence = sum(tag["confidence"] for tag in error_tags) / len(error_tags) if error_tags else 0.0
     
     with get_db() as conn:
         cursor = conn.cursor()
+        
+        question_id = analysis_result.get("question_id")
+        if not question_id and analysis_result.get("original_question"):
+            cursor.execute('''
+                SELECT question_id FROM question WHERE question_description = ?
+            ''', (analysis_result["original_question"],))
+            row = cursor.fetchone()
+            if row:
+                question_id = row["question_id"]
+        
         mistake_case_id = generate_id("MC")
-        cursor.execute('INSERT INTO mistake_case (mistake_case_id, student_id, question_id, current_status, created_at) VALUES (?, ?, ?, ?, ?)', (mistake_case_id, "", "", "correcting", datetime.now().isoformat()))
+        cursor.execute('INSERT INTO mistake_case (mistake_case_id, student_id, question_id, current_status, created_at) VALUES (?, ?, ?, ?, ?)', (mistake_case_id, analysis_result.get("student_id", ""), question_id, "correcting", datetime.now().isoformat()))
         
         for tag in error_tags:
             cursor.execute('INSERT INTO mistake_case_error (mistake_case_id, error_id, error_weight) VALUES (?, ?, ?)', (mistake_case_id, tag["error_id"], tag["confidence"]))
@@ -419,23 +475,26 @@ def analyze_error(analysis_result: dict) -> dict:
         cursor.execute('INSERT INTO mistake_case_knowledge (mistake_case_id, knowledge_id, knowledge_weight) VALUES (?, ?, ?)', (mistake_case_id, knowledge_id, 1.0))
         conn.commit()
     
+    knowledge_data = fetch_knowledge_from_graph(knowledge_id)
+    knowledge_scope = knowledge_data.get("title", "") if knowledge_data else ""
+    
     return {
         "error_tags": error_tags,
         "knowledge_id": knowledge_id,
-        "knowledge_scope": KNOWLEDGE_BASE[knowledge_id]["scope"],
+        "knowledge_scope": knowledge_scope,
         "reasoning_content": f"根据学生作答分析得出错因：{[tag['level3'] for tag in error_tags]}",
         "total_confidence": total_confidence
     }
 
 def retrieve_knowledge(knowledge_id: str) -> dict:
-    knowledge = KNOWLEDGE_BASE.get(knowledge_id)
+    knowledge = fetch_knowledge_from_graph(knowledge_id)
     if not knowledge:
-        raise HTTPException(status_code=404, detail=f"Knowledge not found: {knowledge_id}")
+        raise HTTPException(status_code=404, detail=f"知识点 {knowledge_id} 不存在")
     
     return {
-        "knowledge_explanation": knowledge["explanation"],
-        "difficulty": knowledge["difficulty"],
-        "standard_solution": knowledge["standard_solution"]
+        "knowledge_explanation": knowledge.get("content", ""),
+        "difficulty": knowledge.get("difficulty", "medium"),
+        "standard_solution": ""
     }
 
 def generate_teaching(error_analysis_result: dict, master_level: float, analysis_result: dict) -> dict:
@@ -484,19 +543,7 @@ def update_state(student_id: str, knowledge_id: str, is_correct: bool, confidenc
             wrong_count += 1
             correct_count = 0
         
-        if correct_count >= 2:
-            master_level = 1.00
-            mastery_status = "mastered"
-        elif wrong_count >= 2:
-            master_level = 0.00
-            mastery_status = "weak"
-        elif correct_count == 0 and wrong_count == 0:
-            master_level = 0.00
-            mastery_status = "pending"
-        else:
-            total = correct_count + wrong_count
-            master_level = round((correct_count * 0.5) / total, 2)
-            mastery_status = "pending"
+        master_level, mastery_status = calculate_mastery(correct_count, wrong_count)
         
         if master_level < 0.4:
             next_action = "basic_practice"

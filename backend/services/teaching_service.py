@@ -1,10 +1,10 @@
-import hashlib
 import json
 from datetime import datetime
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import sqlite3
+from id_utils import generate_id
 
 app = FastAPI(title="Teaching Service", version="1.0.0")
 
@@ -58,11 +58,8 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-def generate_id(prefix: str) -> str:
-    return f"{prefix}-{hashlib.md5(f'{datetime.now()}{hash(prefix)}'.encode()).hexdigest()[:8].upper()}"
-
 TEACHING_TEMPLATES = {
-    "G-N-2-005": {
+    "K035": {
         "basic_explain": "我们来学习两位数加两位数的进位加法。当两个数相加时，个位上的数字加起来如果等于或超过10，就要向十位进1。比如25+38，个位5+8=13，我们在个位写3，然后向十位进1，十位上2+3再加上进位的1等于6，所以结果是63。",
         "standard_explain": "两位数加两位数进位加法的计算方法：1. 相同数位对齐；2. 从个位加起；3. 个位相加满十，向十位进1；4. 十位相加时要记得加上进位的1。",
         "advanced_explain": "你已经掌握了进位加法的基本方法，继续加油！记住进位标记很重要哦。",
@@ -78,7 +75,7 @@ TEACHING_TEMPLATES = {
             {"question": "56+37=？", "answer": "93", "solution": "个位6+7=13，写3进1；十位5+3+1=9"}
         ]
     },
-    "G-N-2-006": {
+    "K037": {
         "basic_explain": "我们来学习两位数减两位数的退位减法。当个位上的数字不够减时，要从十位借1当10。比如52-28，个位2-8不够减，从十位借1变成12，12-8=4；十位上5被借走1剩4，4-2=2，所以结果是24。",
         "standard_explain": "两位数减两位数退位减法的计算方法：1. 相同数位对齐；2. 从个位减起；3. 个位不够减，从十位退1；4. 十位相减时要减去退走的1。",
         "advanced_explain": "你已经掌握了退位减法的基本方法，注意退位标记哦！",
@@ -114,9 +111,9 @@ TEACHING_TEMPLATES = {
 
 def get_teaching_template(knowledge_scope: str) -> dict:
     if "加法" in knowledge_scope:
-        return TEACHING_TEMPLATES["G-N-2-005"]
+        return TEACHING_TEMPLATES["K035"]
     elif "减法" in knowledge_scope:
-        return TEACHING_TEMPLATES["G-N-2-006"]
+        return TEACHING_TEMPLATES["K037"]
     else:
         return TEACHING_TEMPLATES["default"]
 
