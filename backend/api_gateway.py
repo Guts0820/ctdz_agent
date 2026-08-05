@@ -18,6 +18,7 @@ from backend.config import (
     DATABASE_PATH,
     service_urls,
     HTTP_TIMEOUT_SECONDS,
+    OCR_TIMEOUT_SECONDS,
     SERVICE_HEALTH_TIMEOUT_SECONDS,
 )
 from backend.services.cache_utils import cache_get, cache_set
@@ -192,7 +193,7 @@ def submit_homework(request: SubmitRequest):
         error_analysis_result = call_error_analysis_service(analysis_result)
         
         if not knowledge_id:
-            knowledge_id = error_analysis_result.get("knowledge_id", "G-N-1-001")
+            knowledge_id = error_analysis_result.get("knowledge_id", "K252")
         
         knowledge_result = call_knowledge_service({"knowledge_id": knowledge_id, "knowledge_scope": error_analysis_result.get("knowledge_scope", "")})
         
@@ -275,7 +276,9 @@ def call_analysis_service(request: SubmitRequest) -> dict:
         "student_write": request.student_write,
         "text_status": "normal"
     }
-    response = requests.post(url, json=payload, timeout=HTTP_TIMEOUT_SECONDS)
+    # 分析服务内部可能执行真实 OCR（推理约 25 秒/张，首次加载模型更久），
+    # 使用 OCR 级别的超时预算，避免图片识别期间被网关判超时。
+    response = requests.post(url, json=payload, timeout=OCR_TIMEOUT_SECONDS)
     response.raise_for_status()
     return response.json()
 

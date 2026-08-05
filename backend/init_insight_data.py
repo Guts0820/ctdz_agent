@@ -90,17 +90,17 @@ def main():
     )
     print("写入错题本 / 答题记录演示数据完成")
 
-    # 复习引擎演示：给 S-0001 补齐与题库映射一致的掌握度记录（G-N-* 编号）
+    # 复习引擎演示：给 S-0001 补齐与题库映射一致的掌握度记录（K-* 编号）
     import sqlite3
     from backend.config import DATABASE_PATH
     conn = sqlite3.connect(DATABASE_PATH)
     cur = conn.cursor()
     demo_mastery = [
-        ("G-N-2-005", "pending", 1, 3, 0.4),   # 100以内进位加法（弱）
-        ("G-N-2-006", "pending", 2, 1, 0.6),   # 100以内退位减法（中）
-        ("G-C-3-001", "pending", 1, 2, 0.5),   # 周长（弱）
-        ("G-C-3-002", "pending", 3, 0, 0.8),   # 面积（较好）
-        ("G-N-3-003", "pending", 2, 1, 0.7),   # 两位数乘法（中）
+        ("K035", "pending", 1, 3, 0.4),   # 两位数加两位数（进位）（弱）
+        ("K037", "pending", 2, 1, 0.6),   # 两位数减两位数（退位）（中）
+        ("K087", "pending", 1, 2, 0.5),   # 长方形周长（弱）
+        ("K105", "pending", 3, 0, 0.8),   # 长方形/正方形面积（较好）
+        ("K082", "pending", 2, 1, 0.7),   # 多位数乘一位数（中）
     ]
     for kid, status, correct, wrong, level in demo_mastery:
         cur.execute(
@@ -129,7 +129,7 @@ def main():
             )
     conn.commit()
     conn.close()
-    print("补齐复习引擎演示掌握度记录 5 条（S-0001 × G-N-*）")
+    print("补齐复习引擎演示掌握度记录 5 条（S-0001 × K-*）")
 
 
 if __name__ == "__main__":
