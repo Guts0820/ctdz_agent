@@ -2,6 +2,7 @@ import json
 import sys
 from datetime import datetime
 from typing import Optional
+from uuid import uuid4
 try:
     from fastapi import FastAPI, HTTPException
 except ImportError:
@@ -11,20 +12,23 @@ from pydantic import BaseModel
 import requests
 import sqlite3
 sys.path.insert(0, 'backend/services')
+from backend.config import (
+    DEFAULT_GRADE,
+    DEFAULT_TEXTBOOK_VERSION,
+    DATABASE_PATH,
+    service_urls,
+    HTTP_TIMEOUT_SECONDS,
+)
+from backend.services.cache_utils import cache_get, cache_set
+from backend.services.observability import log_event, timed
+from llm_client import call_llm_json, get_default_system_prompt, llm_enabled
 from id_utils import generate_id
 
 app = FastAPI(title="AI Math Error Correction System API Gateway", version="1.0.0")
 
-SERVICE_URLS = {
-    "analysis": "http://127.0.0.1:8081",
-    "error_analysis": "http://127.0.0.1:8082",
-    "knowledge": "http://127.0.0.1:8083",
-    "teaching": "http://127.0.0.1:8084",
-    "state": "http://127.0.0.1:8085",
-    "knowledge_graph": "http://127.0.0.1:8007"
-}
+SERVICE_URLS = service_urls()
 
-DATABASE = "backend/database/example_db.db"
+DATABASE = DATABASE_PATH
 
 class SubmitRequest(BaseModel):
     student_id: str
@@ -32,7 +36,7 @@ class SubmitRequest(BaseModel):
     image: Optional[str] = None
     original_question: Optional[str] = None
     student_write: Optional[str] = None
-    grade: Optional[str] = "三年级"
+    grade: Optional[str] = DEFAULT_GRADE
 
 class SubmitResponse(BaseModel):
     status: str
@@ -46,23 +50,103 @@ def get_db():
 def lookup_knowledge_id(question_id: Optional[str]) -> Optional[str]:
     if not question_id:
         return None
-    
+
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            '''
             SELECT knowledge_id FROM question_knowledge_mapping WHERE question_id = ?
-        ''', (question_id,))
+            ''',
+            (question_id,)
+        )
         row = cursor.fetchone()
         if row:
             return row["knowledge_id"]
-    
+
     return None
 
+
+def lookup_question_standard_answer(question_id: Optional[str], original_question: Optional[str]) -> Optional[str]:
+    cache_key = f"question_answer:{question_id or original_question or ''}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if question_id:
+            cursor.execute("SELECT answer FROM question WHERE question_id = ?", (question_id,))
+            row = cursor.fetchone()
+            if row and row["answer"]:
+                cache_set(cache_key, row["answer"])
+                return row["answer"]
+        if original_question:
+            cursor.execute("SELECT answer FROM question WHERE question_description = ?", (original_question,))
+            row = cursor.fetchone()
+            if row and row["answer"]:
+                cache_set(cache_key, row["answer"])
+                return row["answer"]
+    return None
+
+
+def build_judge_prompt(question_json: dict, standard_answer: str) -> tuple[str, str]:
+    system_prompt = get_default_system_prompt() or "你是一个数学判题专家。"
+    user_prompt = json.dumps(
+        {
+            "task": "judge_math_answer",
+            "question": question_json,
+            "standard_answer": standard_answer,
+            "output_schema": {
+                "judge_result": "correct|wrong|copy_warning|unknown",
+                "step_feedback": "string",
+                "error_step_list": ["string"],
+                "miss_step_list": ["string"],
+                "is_copy": "boolean",
+                "core_error_type": "string",
+                "confidence": "number",
+            },
+            "rules": [
+                "只依据题目、学生作答和标准答案判断，不要编造答案",
+                "若学生作答与标准答案一致，judge_result 必须为 correct",
+                "若明显抄写标准答案但缺少过程，可标记 copy_warning",
+                "输出必须是严格 JSON"
+            ],
+        },
+        ensure_ascii=False,
+    )
+    return system_prompt, user_prompt
+
 @app.post("/api/v1/submit", response_model=SubmitResponse)
+@timed("submit_homework")
 def submit_homework(request: SubmitRequest):
+    request_id = uuid4().hex
+    log_event("submit.request", request_id=request_id, student_id=request.student_id, question_id=request.question_id)
     try:
         analysis_result = call_analysis_service(request)
-        
+        standard_answer = lookup_question_standard_answer(request.question_id or analysis_result.get("question_id"), analysis_result.get("original_question"))
+        if standard_answer and llm_enabled():
+            question_json = {
+                "original_question": analysis_result.get("original_question") or request.original_question or "",
+                "student_write": analysis_result.get("student_write") or request.student_write or "",
+                "question_id": request.question_id or analysis_result.get("question_id"),
+                "grade": request.grade or DEFAULT_GRADE,
+                "textbook_version": DEFAULT_TEXTBOOK_VERSION,
+            }
+            try:
+                system_prompt, user_prompt = build_judge_prompt(question_json, standard_answer)
+                llm_judge = call_llm_json(system_prompt, user_prompt)
+                analysis_result.update({
+                    "judge_result": llm_judge.get("judge_result", analysis_result.get("judge_result", "unknown")),
+                    "step_feedback": llm_judge.get("step_feedback", analysis_result.get("step_feedback", "")),
+                    "error_step_list": llm_judge.get("error_step_list", analysis_result.get("error_step_list", [])),
+                    "miss_step_list": llm_judge.get("miss_step_list", analysis_result.get("miss_step_list", [])),
+                    "is_copy": llm_judge.get("is_copy", analysis_result.get("is_copy", False)),
+                    "core_error_type": llm_judge.get("core_error_type", analysis_result.get("core_error_type", "")),
+                    "confidence": llm_judge.get("confidence", analysis_result.get("confidence", 0.0)),
+                })
+            except Exception as exc:
+                analysis_result["llm_fallback_reason"] = str(exc)
+
         if analysis_result["is_copy"]:
             guide_result = call_teaching_guide(analysis_result)
             return SubmitResponse(
@@ -169,6 +253,7 @@ def submit_homework(request: SubmitRequest):
         )
     
     except Exception as e:
+        log_event("submit.error", request_id=request_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 def call_analysis_service(request: SubmitRequest) -> dict:
@@ -181,7 +266,7 @@ def call_analysis_service(request: SubmitRequest) -> dict:
         "student_write": request.student_write,
         "text_status": "normal"
     }
-    response = requests.post(url, json=payload, timeout=10)
+    response = requests.post(url, json=payload, timeout=HTTP_TIMEOUT_SECONDS)
     response.raise_for_status()
     return response.json()
 
@@ -208,7 +293,7 @@ def call_knowledge_service(error_analysis_result: dict) -> dict:
     payload = {
         "knowledge_id": error_analysis_result["knowledge_id"],
         "knowledge_scope": error_analysis_result["knowledge_scope"],
-        "textbook_version": "人教版"
+        "textbook_version": DEFAULT_TEXTBOOK_VERSION
     }
     response = requests.post(url, json=payload, timeout=10)
     response.raise_for_status()
@@ -223,7 +308,7 @@ def call_teaching_service(error_analysis_result: dict, master_level: float, anal
         "original_question": analysis_result["original_question"],
         "student_write": analysis_result["student_write"],
         "difficulty": "medium",
-        "grade": "三年级"
+        "grade": DEFAULT_GRADE
     }
     response = requests.post(url, json=payload, timeout=10)
     response.raise_for_status()
@@ -280,7 +365,7 @@ def call_teaching_guide(analysis_result: dict) -> dict:
 @app.get("/api/v1/student/{student_id}/mastery")
 def get_student_mastery(student_id: str):
     url = f"{SERVICE_URLS['state']}/internal/api/v1/state/mastery/{student_id}"
-    response = requests.get(url, timeout=10)
+    response = requests.get(url, timeout=HTTP_TIMEOUT_SECONDS)
     response.raise_for_status()
     return response.json()
 
@@ -289,11 +374,12 @@ def health_check():
     results = {}
     for service, url in SERVICE_URLS.items():
         try:
-            response = requests.get(f"{url}/health", timeout=3)
+            response = requests.get(f"{url}/health", timeout=SERVICE_HEALTH_TIMEOUT_SECONDS)
             results[service] = response.json()
-        except:
-            results[service] = {"status": "unhealthy"}
-    return {"api_gateway": "healthy", "services": results}
+        except Exception as exc:
+            results[service] = {"status": "unhealthy", "error": str(exc)}
+    overall_status = "healthy" if all(v.get("status") == "healthy" for v in results.values()) else "degraded"
+    return {"api_gateway": overall_status, "services": results}
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,0 +1,25 @@
+services:
+  gateway:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "${API_GATEWAY_PORT:-8000}:8000"
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis_data:

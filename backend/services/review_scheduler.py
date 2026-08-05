@@ -1,16 +1,20 @@
 import json
 from datetime import datetime, timedelta
 from typing import Optional
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import sqlite3
 import time
+
+from backend.config import DATABASE_PATH
 from mastery_utils import calculate_mastery, calculate_advanced, load_evidence
 from id_utils import generate_id
+from backend.services.observability import log_event, timed
 
 app = FastAPI(title="Review Scheduler", version="1.0.0")
 
-DATABASE = "backend/database/example_db.db"
+DATABASE = DATABASE_PATH
 
 def get_db():
     conn = sqlite3.connect(DATABASE)
@@ -27,7 +31,9 @@ class ReviewTask(BaseModel):
     status: str
 
 @app.get("/internal/api/v1/review/scheduler/run")
+@timed("review.scheduler.run")
 def run_scheduler():
+    log_event("review.scheduler.request")
     today = datetime.now().date()
     tasks = []
     
@@ -224,7 +230,7 @@ def complete_review_task(push_record_id: str, is_correct: bool):
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "service": "Review Scheduler"}
+    return {"status": "healthy", "service": "Review Scheduler", "timestamp": datetime.now().isoformat()}
 
 def start_scheduler():
     while True:

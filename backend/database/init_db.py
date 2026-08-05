@@ -2,8 +2,10 @@ import sqlite3
 import os
 import csv
 
-DATABASE = "backend/database/example_db.db"
-KNOWLEDGE_CSV = "backend/database/knowledge_points.csv"
+from backend.config import DATABASE_PATH, KNOWLEDGE_CSV_PATH
+
+DATABASE = DATABASE_PATH
+KNOWLEDGE_CSV = KNOWLEDGE_CSV_PATH
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS students (

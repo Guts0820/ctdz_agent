@@ -1,11 +1,19 @@
-import requests
+import sqlite3
 from typing import Optional
+from datetime import datetime
+
+import requests
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from backend.config import DATABASE_PATH, DEFAULT_TEXTBOOK_VERSION, KNOWLEDGE_GRAPH_URL, HTTP_TIMEOUT_SECONDS
+from backend.services.cache_utils import cache_get, cache_set
+from backend.services.observability import log_event, timed
+
 app = FastAPI(title="Knowledge Service", version="1.0.0")
 
-KG_SERVICE_URL = "http://localhost:8007"
+KG_SERVICE_URL = KNOWLEDGE_GRAPH_URL
+DATABASE = DATABASE_PATH
 
 class KnowledgeRetrieveRequest(BaseModel):
     knowledge_id: str
@@ -28,14 +36,23 @@ class KnowledgeRetrieveResponse(BaseModel):
     teaching_tips: str
 
 def fetch_knowledge_from_graph(knowledge_id: str) -> dict:
-    response = requests.get(f"{KG_SERVICE_URL}/api/knowledge_points/{knowledge_id}", timeout=5)
+    cache_key = f"knowledge:{knowledge_id}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+
+    response = requests.get(f"{KG_SERVICE_URL}/api/knowledge_points/{knowledge_id}", timeout=HTTP_TIMEOUT_SECONDS)
     if response.status_code == 404:
         return None
     response.raise_for_status()
-    return response.json()
+    payload = response.json()
+    cache_set(cache_key, payload)
+    return payload
 
 @app.post("/internal/api/v1/knowledge/retrieve", response_model=KnowledgeRetrieveResponse)
+@timed("knowledge.retrieve")
 def retrieve_knowledge(request: KnowledgeRetrieveRequest):
+    log_event("knowledge.request", knowledge_id=request.knowledge_id, grade=request.grade)
     try:
         knowledge = fetch_knowledge_from_graph(request.knowledge_id)
     except requests.exceptions.RequestException as e:
@@ -62,7 +79,7 @@ def retrieve_knowledge(request: KnowledgeRetrieveRequest):
         scope_validation=scope_validation,
         prerequisite="",
         next_knowledge="",
-        textbook_version=request.textbook_version,
+        textbook_version=request.textbook_version or DEFAULT_TEXTBOOK_VERSION,
         unit="",
         common_errors=knowledge.get("common_mistakes", ""),
         forbidden_explanation="",
@@ -89,7 +106,7 @@ def validate_scope(request: KnowledgeRetrieveRequest, knowledge: dict) -> bool:
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "service": "Knowledge Service"}
+    return {"status": "healthy", "service": "Knowledge Service", "timestamp": datetime.now().isoformat()}
 
 if __name__ == "__main__":
     import uvicorn

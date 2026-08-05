@@ -6,16 +6,17 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import sqlite3
 import requests
+from backend.config import DATABASE_PATH, KNOWLEDGE_GRAPH_URL
 from id_utils import generate_id
-from llm_client import call_llm
+from llm_client import call_llm, call_llm_json, get_default_system_prompt, llm_enabled
 
-KG_SERVICE_URL = "http://127.0.0.1:8007"
+KG_SERVICE_URL = KNOWLEDGE_GRAPH_URL
 
 _knowledge_cache = None
 
 app = FastAPI(title="Error Analysis Agent", version="1.0.0")
 
-DATABASE = "backend/database/example_db.db"
+DATABASE = DATABASE_PATH
 
 class ErrorTag(BaseModel):
     error_id: str

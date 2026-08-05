@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime
 from typing import List, Optional
 try:
@@ -18,11 +19,13 @@ except ImportError:
             super().__init__(detail)
 from pydantic import BaseModel
 import sqlite3
+from backend.config import DATABASE_PATH
+from backend.services.observability import log_event, timed
 from id_utils import generate_id
 
 app = FastAPI(title="Analysis Service", version="1.0.0")
 
-DATABASE = "backend/database/example_db.db"
+DATABASE = DATABASE_PATH
 
 class AnalysisRequest(BaseModel):
     student_id: str
@@ -53,7 +56,9 @@ def get_db():
     return conn
 
 @app.post("/internal/api/v1/analysis/process", response_model=AnalysisResponse)
+@timed("analysis.process")
 def process_analysis(request: AnalysisRequest):
+    log_event("analysis.request", student_id=request.student_id, question_id=request.question_id)
     if request.image is None and request.original_question is None:
         raise HTTPException(status_code=400, detail="Either image or original_question is required")
     
@@ -241,7 +246,7 @@ def analyze_steps(question: str, answer: str) -> dict:
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "service": "Analysis Service"}
+    return {"status": "healthy", "service": "Analysis Service", "timestamp": datetime.now().isoformat()}
 
 if __name__ == "__main__":
     import uvicorn

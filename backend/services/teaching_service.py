@@ -4,11 +4,14 @@ from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import sqlite3
+from backend.config import DATABASE_PATH, DEFAULT_GRADE
+from backend.services.cache_utils import cache_get, cache_set
+from backend.services.observability import log_event, timed
 from id_utils import generate_id
 
 app = FastAPI(title="Teaching Service", version="1.0.0")
 
-DATABASE = "backend/database/example_db.db"
+DATABASE = DATABASE_PATH
 
 class ErrorTag(BaseModel):
     error_id: str
@@ -30,7 +33,7 @@ class TeachingGenerateRequest(BaseModel):
     original_question: str
     student_write: str
     difficulty: Optional[str] = "medium"
-    grade: Optional[str] = "三年级"
+    grade: Optional[str] = DEFAULT_GRADE
 
 class TeachingGenerateResponse(BaseModel):
     explanation: str
@@ -110,15 +113,24 @@ TEACHING_TEMPLATES = {
 }
 
 def get_teaching_template(knowledge_scope: str) -> dict:
+    cache_key = f"teaching_template:{knowledge_scope}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+
     if "加法" in knowledge_scope:
-        return TEACHING_TEMPLATES["K035"]
+        template = TEACHING_TEMPLATES["K035"]
     elif "减法" in knowledge_scope:
-        return TEACHING_TEMPLATES["K037"]
+        template = TEACHING_TEMPLATES["K037"]
     else:
-        return TEACHING_TEMPLATES["default"]
+        template = TEACHING_TEMPLATES["default"]
+    cache_set(cache_key, template)
+    return template
 
 @app.post("/internal/api/v1/teaching/generate", response_model=TeachingGenerateResponse)
+@timed("teaching.generate")
 def generate_teaching(request: TeachingGenerateRequest):
+    log_event("teaching.request", knowledge_scope=request.knowledge_scope, master_level=request.master_level)
     template = get_teaching_template(request.knowledge_scope)
     
     if request.master_level < 0.4:
@@ -178,43 +190,69 @@ def generate_teaching(request: TeachingGenerateRequest):
 def check_frequency(request: FrequencyCheckRequest):
     daily_limit = 5
     weekly_limit = 3
-    
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT daily_push_count, weekly_push_count, last_reset_date
-            FROM frequency_limit
-            WHERE student_id = ? AND knowledge_id = ?
-        ''', (request.student_id, request.knowledge_id))
-        row = cursor.fetchone()
-        
-        if row:
-            daily_push_count = row["daily_push_count"]
-            weekly_push_count = row["weekly_push_count"]
-            last_reset_date = row["last_reset_date"]
-            
-            today = datetime.now().date()
+    today = datetime.now().date()
+    cache_key = f"frequency_limit:{request.student_id}:{request.knowledge_id}"
+
+    cached = cache_get(cache_key)
+    if cached:
+        daily_push_count = cached.get("daily_push_count", 0)
+        weekly_push_count = cached.get("weekly_push_count", 0)
+        last_reset_date = cached.get("last_reset_date")
+    else:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT daily_push_count, weekly_push_count, last_reset_date
+                FROM frequency_limit
+                WHERE student_id = ? AND knowledge_id = ?
+                ''',
+                (request.student_id, request.knowledge_id)
+            )
+            row = cursor.fetchone()
+
+            if row:
+                daily_push_count = row["daily_push_count"]
+                weekly_push_count = row["weekly_push_count"]
+                last_reset_date = row["last_reset_date"]
+            else:
+                daily_push_count = 0
+                weekly_push_count = 0
+                last_reset_date = None
+                cursor.execute(
+                    '''
+                    INSERT INTO frequency_limit (
+                        frequency_limit_id, student_id, knowledge_id,
+                        daily_push_count, weekly_push_count, last_reset_date
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ''',
+                    (generate_id("FL"), request.student_id, request.knowledge_id, 0, 0, str(today))
+                )
+                conn.commit()
+
             if last_reset_date != str(today):
                 daily_push_count = 0
-                cursor.execute('''
+                cursor.execute(
+                    '''
                     UPDATE frequency_limit
                     SET daily_push_count = 0, last_reset_date = ?
                     WHERE student_id = ? AND knowledge_id = ?
-                ''', (str(today), request.student_id, request.knowledge_id))
+                    ''',
+                    (str(today), request.student_id, request.knowledge_id)
+                )
                 conn.commit()
-        else:
-            daily_push_count = 0
-            weekly_push_count = 0
-            cursor.execute('''
-                INSERT INTO frequency_limit (
-                    frequency_limit_id, student_id, knowledge_id,
-                    daily_push_count, weekly_push_count, last_reset_date
-                ) VALUES (?, ?, ?, ?, ?, ?)
-            ''', (generate_id("FL"), request.student_id, request.knowledge_id, 0, 0, str(datetime.now().date())))
-            conn.commit()
-    
+
     push_permission = daily_push_count < daily_limit and weekly_push_count < weekly_limit
-    
+    cache_set(
+        cache_key,
+        {
+            "daily_push_count": daily_push_count,
+            "weekly_push_count": weekly_push_count,
+            "last_reset_date": str(today),
+            "push_permission": push_permission,
+        },
+    )
+
     return FrequencyCheckResponse(
         push_permission=push_permission,
         daily_push_count=daily_push_count,
@@ -222,12 +260,12 @@ def check_frequency(request: FrequencyCheckRequest):
         weekly_push_count=weekly_push_count,
         weekly_limit=weekly_limit,
         remaining_daily=daily_limit - daily_push_count,
-        remaining_weekly=weekly_limit - weekly_push_count
+        remaining_weekly=weekly_limit - weekly_push_count,
     )
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "service": "Teaching Service"}
+    return {"status": "healthy", "service": "Teaching Service", "timestamp": datetime.now().isoformat()}
 
 if __name__ == "__main__":
     import uvicorn

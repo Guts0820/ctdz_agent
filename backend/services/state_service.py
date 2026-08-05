@@ -1,15 +1,19 @@
 import json
 from datetime import datetime, timedelta
 from typing import Optional
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import sqlite3
+
+from backend.config import DATABASE_PATH
+from backend.services.observability import log_event, timed
 from mastery_utils import calculate_mastery, calculate_advanced, load_evidence
 from id_utils import generate_id
 
 app = FastAPI(title="State Service", version="1.0.0")
 
-DATABASE = "backend/database/example_db.db"
+DATABASE = DATABASE_PATH
 
 
 class StateUpdateRequest(BaseModel):
@@ -55,7 +59,9 @@ def get_db():
 
 
 @app.post("/internal/api/v1/state/update", response_model=StateUpdateResponse)
+@timed("state.update")
 def update_state(request: StateUpdateRequest):
+    log_event("state.request", student_id=request.student_id, knowledge_id=request.knowledge_id, is_correct=request.is_correct)
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -231,7 +237,7 @@ def get_mastery(student_id: str, knowledge_id: Optional[str] = None):
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "service": "State Service"}
+    return {"status": "healthy", "service": "State Service", "timestamp": datetime.now().isoformat()}
 
 
 if __name__ == "__main__":
