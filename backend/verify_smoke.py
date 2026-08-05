@@ -82,8 +82,9 @@ def main():
         print("  waiting services ready ...")
         for _ in range(60):
             try:
-                health = requests.get(f"{base}/health", timeout=2).json()
-                if health.get("api_gateway") == "healthy":
+                health = requests.get(f"{base}/health", timeout=8).json()
+                up = {svc: st.get("status") for svc, st in health.get("services", {}).items()}
+                if all(up.get(s) == "healthy" for s in ["analysis", "error_analysis", "knowledge", "teaching", "state", "insight"]):
                     break
             except Exception:
                 pass

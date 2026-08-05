@@ -253,6 +253,14 @@ def submit_homework(request: SubmitRequest):
             }
         )
     
+    except requests.HTTPError as e:
+        status = e.response.status_code if e.response is not None else 500
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail=f"上游服务错误({status}): {e.response.text[:300] if e.response is not None else e}",
+            )
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         log_event("submit.error", request_id=request_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))

@@ -79,9 +79,13 @@ KNOWLEDGE_SERVICE_URL = get_env("KNOWLEDGE_SERVICE_URL", "http://127.0.0.1:8083"
 TEACHING_SERVICE_URL = get_env("TEACHING_SERVICE_URL", "http://127.0.0.1:8084")
 STATE_SERVICE_URL = get_env("STATE_SERVICE_URL", "http://127.0.0.1:8085")
 INSIGHT_SERVICE_URL = get_env("INSIGHT_SERVICE_URL", "http://127.0.0.1:8010")
+OCR_SERVICE_URL = get_env("OCR_SERVICE_URL", "http://127.0.0.1:8087")
 KNOWLEDGE_GRAPH_URL = get_env("KNOWLEDGE_GRAPH_URL", "http://127.0.0.1:8007")
 DEFAULT_GRADE = get_env("DEFAULT_GRADE", "三年级")
 DEFAULT_TEXTBOOK_VERSION = get_env("DEFAULT_TEXTBOOK_VERSION", "人教版")
+OCR_ENABLED = get_bool("OCR_ENABLED", True)
+OCR_TIMEOUT_SECONDS = get_float("OCR_TIMEOUT_SECONDS", 600.0)
+OCR_MIN_CONFIDENCE = get_float("OCR_MIN_CONFIDENCE", 0.3)
 LLM_API_KEY = get_env("LLM_API_KEY", "")
 LLM_BASE_URL = get_env("LLM_BASE_URL", "")
 LLM_MODEL = get_env("LLM_MODEL", "")
@@ -102,4 +106,5 @@ def service_urls() -> Dict[str, str]:
         "teaching": TEACHING_SERVICE_URL,
         "state": STATE_SERVICE_URL,
         "insight": INSIGHT_SERVICE_URL,
+        "ocr": OCR_SERVICE_URL,
     }

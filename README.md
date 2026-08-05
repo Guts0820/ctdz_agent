@@ -231,6 +231,50 @@ LLM_MODEL=your-model-name
 
 只要这些项有效，网关会在拿到标准答案后，优先调用 LLM 进行判题校正。
 
+## OCR 识别（手写作业识别）
+
+仓库里的 `handwriting_ocr_service/` 是独立的手写 OCR 服务（PaddleOCR-VL-1.6，端口 8087），负责把图片转录成 Markdown。主流程已接入：
+
+### 配置
+
+```env
+OCR_ENABLED=true
+OCR_SERVICE_URL=http://127.0.0.1:8087
+OCR_TIMEOUT_SECONDS=600
+OCR_MIN_CONFIDENCE=0.3
+```
+
+注意：PaddleOCR-VL 返回的 `confidence` 是"版面检测兼容性质量评分"，不是逐字识别准确率（实测完美识别的图片约 0.49）。因此阈值默认设得较低（0.3），OCR 服务侧的 `OCR_CONFIDENCE_THRESHOLD`（handwriting_ocr_service/.env）同理设为 0.3，避免把正常结果误判为低置信度。
+
+### 工作方式
+
+- `POST /api/v1/submit` 携带 `image`（base64）时，Analysis Service 会先调用 OCR 服务识别；
+- 识别出的整段文字再做"题目 / 学生作答"分离：配置了 LLM 时用 LLM 分离，否则走规则兜底（优先取 OCR 返回的题目块）；
+- 识别置信度低于 `OCR_MIN_CONFIDENCE` 或返回 `low_confidence` 时：如果请求同时带了文本（`original_question`/`student_write`）则回退文本，否则返回 `OCR failed: low_confidence` 提示人工处理；
+- OCR 服务未启动/不可用时：有文本输入则自动回退文本，不影响主链路；
+- 没传 `image` 或 `OCR_ENABLED=false`：直接走文本输入。
+
+### 启动 OCR 服务
+
+OCR 服务需要独立的 Python 3.12 + PaddlePaddle 环境（与主后端隔离），按 `handwriting_ocr_service/README.md` 安装：
+
+```powershell
+cd handwriting_ocr_service
+py -3.12 -m venv .venv-vl
+.\.venv-vl\Scripts\python.exe -m pip install paddlepaddle==3.3.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+.\.venv-vl\Scripts\python.exe -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+.\.venv-vl\Scripts\python.exe -m uvicorn app.main:app --port 8087
+```
+
+检测到 `.venv-vl` 后，`python backend/start_all.py` 会自动一并启动 OCR 服务（首次启动会下载约 1.9GB 模型，日志在 `backend/logs/OCR_Service.log`）。没装环境时 start_all 会跳过 OCR，主流程自动回退，不影响其他功能。
+
+模型下载源和缓存目录在 `handwriting_ocr_service/.env` 配置（参考 `.env.example`）：
+
+```env
+PADDLE_PDX_MODEL_SOURCE=modelscope   # bos / modelscope / huggingface，bos 卡住时可换 modelscope
+PADDLE_PDX_CACHE_HOME=D:\PaddleOCRCache  # 建议放非系统盘
+```
+
 ## 部署建议
 
 - 生产环境建议使用 PostgreSQL/MySQL 替代 SQLite
