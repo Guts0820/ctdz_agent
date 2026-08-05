@@ -1,6 +1,10 @@
 import json
+import os
+import sys
 from datetime import datetime, timedelta
 from typing import Optional
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -101,7 +105,7 @@ def update_state(request: StateUpdateRequest):
                 knowledge_point_id=request.knowledge_id,
                 evidence=evidence,
             )
-            master_level = result["mastery"]
+            master_level = round(result["mastery"] / 100, 4)
             mastery_status = result["mastery_status"]
             priority = result["priority"]
         else:
@@ -227,7 +231,7 @@ def get_mastery(student_id: str, knowledge_id: Optional[str] = None):
                     knowledge_point_id=row_dict["knowledge_id"],
                     evidence=evidence,
                 )
-                row_dict["master_level"] = result["mastery"]
+                row_dict["master_level"] = round(result["mastery"] / 100, 4)
                 row_dict["mastery_status"] = result["mastery_status"]
                 row_dict["priority"] = result["priority"]
                 row_dict["_formula"] = "advanced-v1"

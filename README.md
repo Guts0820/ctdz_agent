@@ -11,6 +11,10 @@
 - `backend/services/teaching_service.py`：教学内容生成与频率控制
 - `backend/services/state_service.py`：掌握度更新与复习计划生成
 - `backend/services/review_scheduler.py`：复习任务调度
+- `backend/insight_service.py`：Insight 服务（用户体系 / 动态复习引擎 / 成长报告 / 数据看板，端口 8010）
+- `backend/review/`：动态复习引擎（优先级快照、按优先级选题、复习会话、错题订正）
+- `backend/insight/`：成长报告与数据看板（五维能力、薄弱点、学习路径、统计报表）
+- `backend/user_database.py`：用户账号与学习数据存储（user_data.db）
 - `backend/database/init_db.py`：初始化数据库与初始数据
 - `backend/start_all.py`：本地一键启动多个服务
 - `backend/config.py`：统一配置读取
@@ -49,6 +53,7 @@ ERROR_ANALYSIS_SERVICE_URL=http://127.0.0.1:8082
 KNOWLEDGE_SERVICE_URL=http://127.0.0.1:8083
 TEACHING_SERVICE_URL=http://127.0.0.1:8084
 STATE_SERVICE_URL=http://127.0.0.1:8085
+INSIGHT_SERVICE_URL=http://127.0.0.1:8010
 KNOWLEDGE_GRAPH_URL=http://127.0.0.1:8007
 DEFAULT_GRADE=三年级
 DEFAULT_TEXTBOOK_VERSION=人教版
@@ -98,16 +103,16 @@ python backend/start_all.py
 
 该方式会按顺序启动：
 
-- 知识图谱服务（如果仓库中存在 `kg_service/`）
 - Analysis Service
 - Error Analysis Agent
 - Knowledge Service
 - Teaching Service
 - State Service
+- Insight Service
 - Review Scheduler
 - API Gateway
 
-注意：当前仓库中未包含 `kg_service/` 目录，因此如果你没有单独补齐该服务，`start_all.py` 里启动知识图谱服务这一步会失败。其余服务仍可单独启动。
+知识检索与错因分析已全部走 SQLite，不需要 Neo4j / 知识图谱服务。
 
 ### 方式二：单独启动某个服务
 
@@ -170,6 +175,35 @@ curl -X POST http://127.0.0.1:8000/api/v1/submit \
   }'
 ```
 
+## Insight 服务（整合同事的新能力）
+
+合并了团队另一条线的进度，全部数据源已切换到本仓库 SQLite，不依赖 Neo4j：
+
+### 初始化用户/演示数据
+
+```bash
+python backend/init_insight_data.py
+```
+
+会创建 `backend/user_data.db`（用户、错题本、学习进度、答题记录），并写入演示用户 `test_student / 123456` 与 S-0001 的复习演示数据。
+
+### 启动
+
+`backend/start_all.py` 已包含 Insight Service（8010 端口），也可单独启动：
+
+```bash
+python backend/insight_service.py
+```
+
+### 主要接口（Insight Service，8010）
+
+- 用户：`POST /api/register`、`POST /api/login`、错题本/学习进度/答题记录增删查
+- 复习引擎：`POST /api/v1/priority-runs`（优先级快照）、`POST /api/v1/review-plans`（按优先级+知识点覆盖度选题）、`POST /api/v1/review-plans/{id}/start`（会话）、`POST /api/v1/review-sessions/{id}/attempts`（答题）、`POST /api/v1/attempts/{id}/correction`（订正，答错才揭晓答案）
+- 成长报告：`GET /api/growth_report/{user_id}`（五维能力/薄弱点/近期进步/学习路径/复习计划）
+- 数据看板：`GET /api/datahub/statistics/overview`、`/api/datahub/statistics/class_mastery/{class_id}`、`/api/datahub/comprehensive/{student_id}`
+
+复习计划与会话状态保存在进程内存中（与同事原实现一致），答题结果会写回 `answer_history` 并更新 `knowledge_mastery`。
+
 ## Redis 缓存
 
 项目支持 Redis 缓存，但不是强制依赖。
@@ -214,5 +248,23 @@ LLM_MODEL=your-model-name
 - LLM 判题接入与降级
 - 基础部署容器文件
 - 基础日志与健康检查增强
+- 用户账号体系（注册/登录/错题本/学习进度/答题记录）
+- 动态复习引擎（优先级排序选题 + 复习会话 + 集中订正）
+- 成长报告与数据看板（五维能力、薄弱点、学习路径、统计）
+- 知识图谱依赖移除：知识检索与错因候选全部走 SQLite，不再需要 Neo4j
 
-如果你准备继续扩展知识图谱服务，请补齐 `kg_service/` 目录及其 Neo4j 配置。
+已知事项：
+
+- 知识点编号存在两套体系（K-* 与 G-N-*），知识服务已做名称模糊回退兜底，后续建议统一编号。
+- 防抄袭检测按会议决定暂缓，接口保留但已禁用（避免"63"这类正确答案被误判）。
+
+## 为什么数据库统一用 SQLite 而不是知识图谱（Neo4j）
+
+这是个有意的架构取舍，不是简单降级：
+
+1. **可独立运行、零外部依赖**：Neo4j 需要单独部署服务器和账号；当前仓库没有 `kg_service/`，之前微服务强依赖 8007 端口导致"知识图谱服务不存在就整条链路 500"。全部走 SQLite 后，`start_all.py` 一键就能把整套服务跑起来。
+2. **当前功能用到的关系深度很浅**：现在的关系最多 1–2 跳（题目→知识点、错题→错因、知识点先修/后续），用关联表 + JOIN 完全够，图数据库的多跳/变长路径优势暂时用不上。
+3. **数据分层与会议方向一致**：会议定的方向是"账号等基础信息拆到关系型数据库，题目/知识点做向量化放图/向量库"。现在账号（user_data.db）和业务数据（example_db.db）都落在关系库，正是这个方向的前半段；知识点/题目关系后续真正要做学习路径、易混推荐、相似题向量检索时，再迁到 Neo4j/向量库，SQLite 保持为唯一真源，加一层同步即可。
+4. **成本**：图库的运维、备份、导入成本更高，在核心链路还没跑通前引入属于过早优化。
+
+如果后续要接回 Neo4j，`backend/config.py` 里的 `KNOWLEDGE_GRAPH_URL` 已作为占位保留。

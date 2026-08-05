@@ -78,6 +78,7 @@ ERROR_ANALYSIS_SERVICE_URL = get_env("ERROR_ANALYSIS_SERVICE_URL", "http://127.0
 KNOWLEDGE_SERVICE_URL = get_env("KNOWLEDGE_SERVICE_URL", "http://127.0.0.1:8083")
 TEACHING_SERVICE_URL = get_env("TEACHING_SERVICE_URL", "http://127.0.0.1:8084")
 STATE_SERVICE_URL = get_env("STATE_SERVICE_URL", "http://127.0.0.1:8085")
+INSIGHT_SERVICE_URL = get_env("INSIGHT_SERVICE_URL", "http://127.0.0.1:8010")
 KNOWLEDGE_GRAPH_URL = get_env("KNOWLEDGE_GRAPH_URL", "http://127.0.0.1:8007")
 DEFAULT_GRADE = get_env("DEFAULT_GRADE", "三年级")
 DEFAULT_TEXTBOOK_VERSION = get_env("DEFAULT_TEXTBOOK_VERSION", "人教版")
@@ -100,5 +101,5 @@ def service_urls() -> Dict[str, str]:
         "knowledge": KNOWLEDGE_SERVICE_URL,
         "teaching": TEACHING_SERVICE_URL,
         "state": STATE_SERVICE_URL,
-        "knowledge_graph": KNOWLEDGE_GRAPH_URL,
+        "insight": INSIGHT_SERVICE_URL,
     }

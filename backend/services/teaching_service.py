@@ -1,6 +1,11 @@
 import json
+import os
+import sys
 from datetime import datetime
 from typing import List, Optional
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import sqlite3

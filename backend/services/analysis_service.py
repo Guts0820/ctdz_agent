@@ -1,7 +1,12 @@
 import json
+import os
+import sys
 import time
 from datetime import datetime
 from typing import List, Optional
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 try:
     from fastapi import FastAPI, HTTPException
 except ImportError:
@@ -183,10 +188,8 @@ def simulate_process_check(parse_result: dict, standard_steps: Optional[str]) ->
     return steps
 
 def check_plagiarism(answer: str) -> bool:
-    standard_answers = ["63", "25+38=63", "25加38等于63"]
-    for std in standard_answers:
-        if std in answer and len(answer) <= len(std) + 5:
-            return True
+    # 防抄袭检测按会议决定暂缓开发（低龄段看图题误判风险高），仅保留接口。
+    # 原实现是简单的子串匹配，会把"63"这类正确短答案误判为抄袭，故先禁用。
     return False
 
 def analyze_steps(question: str, answer: str) -> dict:

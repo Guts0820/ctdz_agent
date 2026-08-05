@@ -18,6 +18,7 @@ from backend.config import (
     DATABASE_PATH,
     service_urls,
     HTTP_TIMEOUT_SECONDS,
+    SERVICE_HEALTH_TIMEOUT_SECONDS,
 )
 from backend.services.cache_utils import cache_get, cache_set
 from backend.services.observability import log_event, timed

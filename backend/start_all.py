@@ -26,13 +26,13 @@ def start_service(name, script_path, port, log_dir="backend/logs"):
 
 def main():
     services = [
-        ("Knowledge Graph Service", "kg_service/main.py", 8007),
         ("Analysis Service", "backend/services/analysis_service.py", 8081),
         ("Error Analysis Agent", "backend/services/error_analysis_agent.py", 8082),
         ("Knowledge Service", "backend/services/knowledge_service.py", 8083),
         ("Teaching Service", "backend/services/teaching_service.py", 8084),
         ("State Service", "backend/services/state_service.py", 8085),
         ("Review Scheduler", "backend/services/review_scheduler.py", 8086),
+        ("Insight Service", "backend/insight_service.py", 8010),
         ("API Gateway", "backend/api_gateway.py", 8000)
     ]
     
