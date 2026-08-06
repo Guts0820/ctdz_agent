@@ -6,9 +6,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.config import Settings
 from app.models import RecognitionResult
-from app.services.paddle_ocr import PaddleOCREngine
 from app.services.paddleocr_vl import PaddleOCRVLEngine
-from app.services.pix2text_formula import Pix2TextFormulaEngine
 from app.services.qwen_vision import QwenVisionEngine
 from app.services.recognition_service import RecognitionService
 
@@ -21,25 +19,13 @@ settings = Settings.from_env()
 @lru_cache
 def build_recognition_service() -> RecognitionService:
     fallback_engine = QwenVisionEngine(settings) if settings.qwen_is_configured else None
-    formula_engine = Pix2TextFormulaEngine(settings.pix2text_device) if settings.pix2text_enabled else None
     return RecognitionService(
-        primary_engine=_build_primary_engine(),
-        fallback_engine=fallback_engine,
-        confidence_threshold=settings.confidence_threshold,
-        formula_engine=formula_engine,
-    )
-
-
-def _build_primary_engine():
-    if settings.ocr_engine == "paddleocr_legacy":
-        return PaddleOCREngine()
-    if settings.ocr_engine == "paddleocr_vl":
-        return PaddleOCRVLEngine(
+        primary_engine=PaddleOCRVLEngine(
             device=settings.paddleocr_vl_device,
             pipeline_version=settings.paddleocr_vl_pipeline_version,
-        )
-    raise RuntimeError(
-        "Unsupported OCR_ENGINE. Use 'paddleocr_vl' or 'paddleocr_legacy'."
+        ),
+        fallback_engine=fallback_engine,
+        confidence_threshold=settings.confidence_threshold,
     )
 
 

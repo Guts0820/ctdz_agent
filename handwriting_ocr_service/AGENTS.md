@@ -6,19 +6,19 @@
 
 ## 架构
 
-FastAPI 接收图片后，默认通过 `PaddleOCRVLEngine` 调用完整的 PaddleOCR-VL-1.6 流程，将版面、手写正文和公式直接转换为 Markdown。适配器会为裸 LaTeX 命令补充 `$...$` 数学分隔符，并跳过已有分隔符和代码块。`RecognitionService` 负责质量检查与 Qwen 兜底；VL 不提供旧 PP-OCR 的逐行识别分数，因此 `confidence` 仅保留为版面质量兼容字段，兜底以空输出、异常重复等 `review_required` 信号为准。`OCR_ENGINE=paddleocr_legacy` 可切回旧 PP-OCR；Pix2Text 仅用于旧引擎。
+FastAPI 接收图片后，默认通过 `PaddleOCRVLEngine` 调用完整的 PaddleOCR-VL-1.6 流程，将版面、手写正文和公式直接转换为 Markdown。适配器会为裸 LaTeX 命令补充 `$...$` 数学分隔符，并跳过已有分隔符和代码块。`RecognitionService` 负责质量检查与 Qwen 兜底；VL 不提供旧 PP-OCR 的逐行识别分数，因此 `confidence` 仅保留为版面质量兼容字段，兜底以空输出、异常重复等 `review_required` 信号为准。服务仅使用 PaddleOCR-VL（GPU 推理），已移除旧 PP-OCR 与 Pix2Text 引擎。
 
 ## 目录结构
 
 - `app/main.py`：HTTP 入口与健康检查。
 - `interactive_ocr.py`：输入图片绝对路径并将识别结果写入 Markdown 的本地交互入口。
 - `app/services/paddleocr_vl.py`：PaddleOCR-VL-1.6 适配器、Markdown 提取与质量检查。
-- `app/services/`：识别编排、旧 PaddleOCR/Pix2Text 适配器、Qwen 兜底和 Markdown 格式化。
+- `app/services/`：识别编排、PaddleOCR-VL 适配器、Qwen 兜底和 Markdown 格式化。
 - `app/models.py`：跨层结果模型。
 - `tests/`：无需模型或网络的 pytest 单元测试。
 - `recognition_results/`：交互测试生成的本地结果目录，已被 Git 忽略。
 - `.env.example`：OCR 路由、VL 运行设备和 Qwen 视觉模型的非敏感配置模板。
-- `requirements.txt`：VL 核心依赖；`requirements-pix2text.txt` 是旧引擎可选依赖。
+- `requirements.txt`：VL 核心依赖。
 
 ## 开发规范
 
