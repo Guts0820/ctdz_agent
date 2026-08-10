@@ -4,19 +4,23 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 try:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Request
+    from fastapi.middleware.cors import CORSMiddleware
+    from starlette.responses import JSONResponse
 except ImportError:
     print("错误：无法导入 fastapi。请运行 'pip install fastapi' 安装依赖。", file=sys.stderr)
     sys.exit(1)
 from pydantic import BaseModel
 import requests
 import sqlite3
+import httpx
 sys.path.insert(0, 'backend/services')
 from backend.config import (
     DEFAULT_GRADE,
     DEFAULT_TEXTBOOK_VERSION,
     DATABASE_PATH,
     service_urls,
+    INSIGHT_SERVICE_URL,
     HTTP_TIMEOUT_SECONDS,
     OCR_TIMEOUT_SECONDS,
     SERVICE_HEALTH_TIMEOUT_SECONDS,
@@ -27,6 +31,14 @@ from llm_client import call_llm_json, get_default_system_prompt, llm_enabled
 from id_utils import generate_id
 
 app = FastAPI(title="AI Math Error Correction System API Gateway", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 SERVICE_URLS = service_urls()
 
@@ -380,6 +392,39 @@ def get_student_mastery(student_id: str):
     response = requests.get(url, timeout=HTTP_TIMEOUT_SECONDS)
     response.raise_for_status()
     return response.json()
+
+@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def insight_proxy(path: str, request: Request):
+    """统一 API 入口：网关本地未处理的 /api/* 请求转发到 Insight 服务（8010）。
+
+    网关已注册的 /api/v1/submit、/api/v1/student/{id}/mastery 会优先匹配本地路由，
+    其余（登录/注册/错题本/报告/复习等）统一经此转发，前端只需访问 8000 一个端口。
+    """
+    url = f"{INSIGHT_SERVICE_URL.rstrip('/')}/api/{path}"
+    body = await request.body()
+    headers = {}
+    if body:
+        headers["Content-Type"] = request.headers.get("content-type", "application/json")
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as client:
+            resp = await client.request(
+                request.method,
+                url,
+                params=dict(request.query_params),
+                content=body or None,
+                headers=headers,
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Insight 服务不可用: {exc}")
+
+    content = None
+    if resp.content:
+        try:
+            content = resp.json()
+        except Exception:
+            content = resp.text
+    return JSONResponse(status_code=resp.status_code, content=content)
+
 
 @app.get("/health")
 def health_check():
