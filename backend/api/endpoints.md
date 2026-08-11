@@ -47,7 +47,13 @@
         "master_level": 0.65,
         "next_action": "practice",
         "correct_count": 1,
-        "wrong_count": 0
+        "wrong_count": 0,
+        "ocr": {
+            "markdown": "OCR 识别出的 Markdown 文本",
+            "engine": "paddleocr-vl-1.6",
+            "fallback_used": false,
+            "status": "success/low_confidence"
+        }
     }
 }
 ```
@@ -495,3 +501,5 @@
     "timestamp": "2024-01-15 10:30:00"
 }
 ```
+
+图片请求会先由 Analysis Service 转发至独立 OCR 服务 `POST http://127.0.0.1:8087/v1/recognize`（multipart 字段名 `image`）。OCR 服务不可用时返回 `503`；前端应提示用户稍后重试，而不是使用模拟识别结果。
