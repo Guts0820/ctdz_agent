@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小学生数学知识图谱 - 智能学习系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+        .page { display: none; }
+        .page.active { display: block; }
+        .card-hover { transition: all 0.3s; }
+        .card-hover:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
+        .gradient-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .gradient-success { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
+        .gradient-warning { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .gradient-info { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .shadow-soft { box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        .progress-ring { transform: rotate(-90deg); }
+        .tab-active { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        .camera-frame { border: 3px dashed #667eea; border-radius: 16px; position: relative; overflow: hidden; }
+        .camera-frame::after { content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 2px; background: #667eea; animation: scan 2s ease-in-out infinite; }
+        @keyframes scan { 0%, 100% { top: 20%; } 50% { top: 80%; } }
+        .overflow-x-auto::-webkit-scrollbar { height: 6px; }
+        .overflow-x-auto::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
+        .overflow-x-auto::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+        .overflow-x-auto::-webkit-scrollbar-thumb:hover { background: #a1a1a1; }
+        .student-scroll .student-circle + .student-circle {
+            margin-left: 4px;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+<div id="app"></div>
+
+<script src="js/api.js"></script>
+<script src="js/mock-data.js"></script>
+<script src="js/login.js"></script>
+<script src="js/student.js"></script>
+<script src="js/teacher.js"></script>
+<script src="js/admin.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>

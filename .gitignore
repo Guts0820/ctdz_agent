@@ -7,3 +7,6 @@ logs/
 .venv/
 .env
 .vscode/
+outputs/
+**/.venv/
+**/node_modules/

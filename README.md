@@ -4,6 +4,7 @@
 
 ## 项目结构
 
+- `frontend/`：静态学生、教师和管理员端页面；拍照作业会调用 API 网关。
 - `backend/api_gateway.py`：统一入口，负责提交作业后的服务编排
 - `backend/services/analysis_service.py`：OCR/答题分析、判题基础结果生成
 - `backend/services/error_analysis_agent.py`：错因分析与错误标签生成
@@ -55,6 +56,9 @@ TEACHING_SERVICE_URL=http://127.0.0.1:8084
 STATE_SERVICE_URL=http://127.0.0.1:8085
 INSIGHT_SERVICE_URL=http://127.0.0.1:8010
 KNOWLEDGE_GRAPH_URL=http://127.0.0.1:8007
+OCR_SERVICE_URL=http://127.0.0.1:8087
+OCR_ENABLED=true
+OCR_TIMEOUT_SECONDS=600
 DEFAULT_GRADE=三年级
 DEFAULT_TEXTBOOK_VERSION=人教版
 LLM_TIMEOUT_SECONDS=60
@@ -76,6 +80,8 @@ LLM_SYSTEM_PROMPT=你是一个小学数学题目判题专家。你需要根据�
 - `API_GATEWAY_PORT`：API 网关端口
 - `*_SERVICE_URL`：各内部服务地址
 - `KNOWLEDGE_GRAPH_URL`：知识图谱服务地址
+- `OCR_SERVICE_URL` / `OCR_ENABLED`：手写 OCR 地址与开关；图片提交由分析服务转发到 OCR 服务
+- `OCR_TIMEOUT_SECONDS`：OCR 推理超时；首次模型加载或复杂图片可能耗时数分钟
 - `DEFAULT_GRADE` / `DEFAULT_TEXTBOOK_VERSION`：主流程默认年级与教材版本
 - `LLM_*`：大模型判题配置
 - `REDIS_URL`：启用缓存时填写
@@ -111,8 +117,22 @@ python backend/start_all.py
 - Insight Service
 - Review Scheduler
 - API Gateway
+- Handwriting OCR Service（端口 8087，独立 Python 环境）
 
 知识检索与错因分析已全部走 SQLite，不需要 Neo4j / 知识图谱服务。
+
+OCR 服务依赖应按 `handwriting_ocr_service/README.md` 安装；若未创建 `handwriting_ocr_service/.venv-vl`，启动脚本会跳过 OCR 服务。
+
+### 启动前端
+
+另开终端运行：
+
+```bash
+cd frontend
+python -m http.server 3000
+```
+
+浏览器访问 `http://127.0.0.1:3000`。
 
 ### 方式二：单独启动某个服务
 

@@ -64,6 +64,10 @@ class AnalysisResponse(BaseModel):
     text_status: str
     student_id: str
     question_id: Optional[str] = None
+    ocr_markdown: Optional[str] = None
+    ocr_engine: Optional[str] = None
+    ocr_fallback_used: Optional[bool] = None
+    ocr_status: Optional[str] = None
 
 def get_db():
     conn = sqlite3.connect(DATABASE)
@@ -91,6 +95,12 @@ def process_analysis(request: AnalysisRequest):
     parse_result = simulate_parse(ocr_result)
     
     process_result = simulate_process_check(parse_result, request.standard_solve_steps)
+    process_result.update({
+        "ocr_markdown": ocr_result.get("ocr_markdown"),
+        "ocr_engine": ocr_result.get("engine"),
+        "ocr_fallback_used": ocr_result.get("fallback_used"),
+        "ocr_status": ocr_result.get("ocr_status", ocr_result.get("status")),
+    })
     
     with get_db() as conn:
         cursor = conn.cursor()
@@ -249,6 +259,8 @@ def run_ocr(request: AnalysisRequest) -> dict:
             "student_write": "",
             "confidence": confidence,
             "engine": engine,
+            "fallback_used": bool(ocr_data.get("fallback_used", False)),
+            "status": status,
         }
 
     separated = separate_question_answer(markdown, ocr_data, request)
@@ -259,6 +271,8 @@ def run_ocr(request: AnalysisRequest) -> dict:
         "confidence": confidence,
         "engine": engine,
         "ocr_markdown": markdown,
+        "fallback_used": bool(ocr_data.get("fallback_used", False)),
+        "status": status,
     }
 
 def simulate_ocr(request: AnalysisRequest) -> dict:

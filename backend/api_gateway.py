@@ -137,6 +137,14 @@ def submit_homework(request: SubmitRequest):
     log_event("submit.request", request_id=request_id, student_id=request.student_id, question_id=request.question_id)
     try:
         analysis_result = call_analysis_service(request)
+        ocr_data = {
+            "ocr": {
+                "markdown": analysis_result.get("ocr_markdown"),
+                "engine": analysis_result.get("ocr_engine"),
+                "fallback_used": analysis_result.get("ocr_fallback_used"),
+                "status": analysis_result.get("ocr_status"),
+            }
+        } if analysis_result.get("ocr_markdown") is not None else {}
         standard_answer = lookup_question_standard_answer(request.question_id or analysis_result.get("question_id"), analysis_result.get("original_question"))
         if standard_answer and llm_enabled():
             question_json = {
@@ -166,6 +174,7 @@ def submit_homework(request: SubmitRequest):
             return SubmitResponse(
                 status="success",
                 data={
+                    **ocr_data,
                     "judge_result": analysis_result["judge_result"],
                     "is_copy": True,
                     "hints": guide_result.get("hints", []),
@@ -182,6 +191,7 @@ def submit_homework(request: SubmitRequest):
                 return SubmitResponse(
                     status="success",
                     data={
+                        **ocr_data,
                         "judge_result": "correct",
                         "step_feedback": analysis_result["step_feedback"],
                         "master_level": 1.0,
@@ -194,6 +204,7 @@ def submit_homework(request: SubmitRequest):
             return SubmitResponse(
                 status="success",
                 data={
+                    **ocr_data,
                     "judge_result": "correct",
                     "step_feedback": analysis_result["step_feedback"],
                     "knowledge_id": knowledge_id,
@@ -217,6 +228,7 @@ def submit_homework(request: SubmitRequest):
             return SubmitResponse(
                 status="success",
                 data={
+                    **ocr_data,
                     "judge_result": analysis_result["judge_result"],
                     "step_feedback": analysis_result["step_feedback"],
                     "error_tags": error_analysis_result["error_tags"],
@@ -240,6 +252,7 @@ def submit_homework(request: SubmitRequest):
         return SubmitResponse(
             status="success",
             data={
+                **ocr_data,
                 "judge_result": analysis_result["judge_result"],
                 "step_feedback": analysis_result["step_feedback"],
                 "error_step_list": analysis_result["error_step_list"],
@@ -266,6 +279,8 @@ def submit_homework(request: SubmitRequest):
             }
         )
     
+    except HTTPException:
+        raise
     except requests.HTTPError as e:
         status = e.response.status_code if e.response is not None else 500
         if 400 <= status < 500:
@@ -273,7 +288,7 @@ def submit_homework(request: SubmitRequest):
                 status_code=status,
                 detail=f"上游服务错误({status}): {e.response.text[:300] if e.response is not None else e}",
             )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:
         log_event("submit.error", request_id=request_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -290,9 +305,16 @@ def call_analysis_service(request: SubmitRequest) -> dict:
     }
     # 分析服务内部可能执行真实 OCR（推理约 25 秒/张，首次加载模型更久），
     # 使用 OCR 级别的超时预算，避免图片识别期间被网关判超时。
-    response = requests.post(url, json=payload, timeout=OCR_TIMEOUT_SECONDS)
-    response.raise_for_status()
-    return response.json()
+    try:
+        response = requests.post(url, json=payload, timeout=OCR_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        return response.json()
+    except requests.HTTPError as error:
+        response = error.response
+        status = response.status_code if response is not None else 502
+        raise HTTPException(status_code=status, detail="Analysis service rejected the request.") from error
+    except requests.RequestException as error:
+        raise HTTPException(status_code=503, detail="Analysis service is unavailable.") from error
 
 def call_error_analysis_service(analysis_result: dict) -> dict:
     url = f"{SERVICE_URLS['error_analysis']}/internal/api/v1/error-analysis/analyze"
