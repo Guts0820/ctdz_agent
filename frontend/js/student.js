@@ -1,27 +1,4 @@
 const StudentPage = {
-    realData: { mistakes: null, report: null },
-    _loading: {},
-
-    async loadMistakes() {
-        const user = MockData.currentUser || {};
-        if (!user.userId) return;
-        try {
-            this.realData.mistakes = await Api.getWrongQuestions(user.userId);
-        } catch (e) {
-            this.realData.mistakes = []; // 接口不可用时用 MockData 兜底渲染
-        }
-    },
-
-    async loadReport() {
-        const user = MockData.currentUser || {};
-        const sid = user.userId || user.id || 'S-0001';
-        try {
-            this.realData.report = await Api.getGrowthReport(sid);
-        } catch (e) {
-            this.realData.report = null;
-        }
-    },
-
     render() {
         return `
         <div class="min-h-screen pb-20">
@@ -178,26 +155,6 @@ const StudentPage = {
             path: this.renderPath,
             report: this.renderReport
         };
-
-        if (page === 'mistakes' && this.realData.mistakes === null && !this._loading.mistakes) {
-            this._loading.mistakes = true;
-            content.innerHTML = '<div class="p-10 text-center text-gray-400">📚 加载错题本...</div>';
-            this.loadMistakes().finally(() => {
-                this._loading.mistakes = false;
-                this.navigate('mistakes');
-            });
-            return;
-        }
-        if (page === 'report' && this.realData.report === null && !this._loading.report) {
-            this._loading.report = true;
-            content.innerHTML = '<div class="p-10 text-center text-gray-400">📊 加载成长报告...</div>';
-            this.loadReport().finally(() => {
-                this._loading.report = false;
-                this.navigate('report');
-            });
-            return;
-        }
-
         content.innerHTML = renderMap[page]();
         if (page === 'report') this.initReportCharts();
         if (page === 'path') this.initPathCharts();
@@ -332,118 +289,19 @@ const StudentPage = {
                 </div>
             </div>
             
-            <div onclick="StudentPage.selectImage()" class="bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl p-4 cursor-pointer shadow-soft">
-                <div class="font-bold">🎯 上传作业图片</div>
-                <div class="text-sm opacity-90">调用真实 OCR 识别并批改，复杂图片可能需要数分钟</div>
+            <div onclick="StudentPage.showMockResult()" class="bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl p-4 cursor-pointer shadow-soft">
+                <div class="font-bold">🎯 体验拍照录入（演示）</div>
+                <div class="text-sm opacity-90">查看系统识别和批改示例</div>
             </div>
         </div>`;
     },
     
     takePhoto() {
-        this.pickImage();
+        this.showMockResult();
     },
     
     selectImage() {
-        this.pickImage();
-    },
-
-    pickImage() {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.onchange = () => {
-            const file = input.files && input.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = async () => {
-                const content = document.getElementById('student-content');
-                content.innerHTML = '<div class="p-10 text-center text-gray-400" role="status">🔍 正在识别与批改，请稍候。复杂手写图片可能需要数分钟，请勿关闭页面。</div>';
-                try {
-                    const user = MockData.currentUser || {};
-                    const resp = await Api.submitHomework(user.id || 'S-0001', reader.result);
-                    this.showSubmitResult(resp && resp.data ? resp.data : resp);
-                } catch (error) {
-                    content.innerHTML = `
-                        <div class="bg-red-50 border border-red-200 rounded-2xl p-6 text-center">
-                            <div class="text-3xl mb-2">😵</div>
-                            <div class="font-bold text-red-700 mb-1">识别失败</div>
-                            <div class="text-xs text-red-500 mb-4">${error.message || '后端服务不可用'}</div>
-                            <button onclick="StudentPage.navigate('camera')" class="bg-purple-600 text-white px-5 py-2 rounded-xl text-sm">返回重试</button>
-                        </div>`;
-                }
-            };
-            reader.readAsDataURL(file);
-        };
-        input.click();
-    },
-
-    showSubmitResult(data) {
-        const isCorrect = data.judge_result === 'correct';
-        const tags = (data.error_tags || []).map(t => t.level3 || t.level2 || t.level1).filter(Boolean);
-        const ocr = data.ocr || {};
-        const recognizedMarkdown = typeof ocr.markdown === 'string' ? ocr.markdown.trim() : '';
-        const recognizedText = this.escapeHtml(recognizedMarkdown);
-        const engine = this.escapeHtml(ocr.engine || '未知引擎');
-        const content = document.getElementById('student-content');
-        content.innerHTML = `
-        <div class="space-y-4">
-            <div class="${isCorrect ? 'bg-gradient-to-r from-green-500 to-emerald-600' : 'bg-gradient-to-r from-red-500 to-orange-500'} text-white rounded-2xl p-5 shadow-soft">
-                <div class="text-sm opacity-90">📋 批改结果</div>
-                <div class="text-2xl font-bold mt-1">${isCorrect ? '✓ 回答正确' : '✗ 回答错误'}</div>
-                <div class="text-xs opacity-80 mt-2">${data.step_feedback || ''}</div>
-            </div>
-
-            ${recognizedMarkdown ? `
-            <div class="bg-white rounded-2xl p-4 shadow-soft">
-                <div class="font-bold mb-2">🔎 OCR 识别结果</div>
-                <div class="text-xs text-gray-500 mb-2">${engine}${ocr.fallback_used ? ' · 已使用兜底识别' : ''}${ocr.status === 'low_confidence' ? ' · 建议核对' : ''}</div>
-                <pre class="whitespace-pre-wrap break-words text-sm text-gray-700 font-sans">${recognizedText}</pre>
-            </div>` : ''}
-
-            ${data.core_error_type ? `
-            <div class="bg-white rounded-2xl p-4 shadow-soft">
-                <div class="font-bold mb-2">🧩 错误定位</div>
-                <div class="text-sm text-gray-700">${data.core_error_type}</div>
-            </div>` : ''}
-
-            ${tags.length > 0 ? `
-            <div class="bg-white rounded-2xl p-4 shadow-soft">
-                <div class="font-bold mb-2">⚠️ 错因分析</div>
-                <div class="flex flex-wrap gap-2">
-                    ${tags.map(t => `<span class="badge bg-red-100 text-red-700 px-3 py-1">${t}</span>`).join('')}
-                </div>
-            </div>` : ''}
-
-            ${data.knowledge_scope ? `
-            <div class="bg-white rounded-2xl p-4 shadow-soft">
-                <div class="font-bold mb-2">📚 关联知识点</div>
-                <div class="text-sm text-gray-700">${data.knowledge_scope}</div>
-            </div>` : ''}
-
-            ${data.master_level !== undefined ? `
-            <div class="bg-white rounded-2xl p-4 shadow-soft">
-                <div class="flex items-center justify-between">
-                    <div class="font-bold">📈 当前掌握度</div>
-                    <span class="badge ${(data.master_level || 0) >= 0.6 ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}">
-                        ${Math.round((data.master_level || 0) * 100)}%
-                    </span>
-                </div>
-                <div class="text-xs text-gray-500 mt-1">${data.mastery_status || ''} · 已错 ${data.wrong_count || 0} 次</div>
-            </div>` : ''}
-
-            <button onclick="StudentPage.navigate('camera')" class="w-full bg-purple-600 text-white rounded-xl py-3 font-medium">
-                再拍一题 →
-            </button>
-        </div>`;
-    },
-
-    escapeHtml(value) {
-        return String(value)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
+        this.showMockResult();
     },
     
     showMockResult() {
@@ -902,20 +760,8 @@ const StudentPage = {
     },
     
     renderMistakes() {
-        const realList = this.realData.mistakes;
-        const mistakes = (realList && realList.length !== undefined)
-            ? realList.map(m => ({
-                status: m.reviewed ? '已订正' : '未订正',
-                question_text: '题目 ' + (m.question_id || m.id || ''),
-                student_answer: m.wrong_answer || '—',
-                correct_answer: '—',
-                error_type: m.error_cause_id || '未分类',
-                error_name: m.error_cause_id || '待分析',
-                date: (m.last_wrong_time || '').slice(0, 10)
-            }))
-            : MockData.mistakes;
-        const uncorrected = mistakes.filter(m => m.status === '未订正');
-        const corrected = mistakes.filter(m => m.status === '已订正');
+        const uncorrected = MockData.mistakes.filter(m => m.status === '未订正');
+        const corrected = MockData.mistakes.filter(m => m.status === '已订正');
         
         return `
         <div class="space-y-4">
@@ -1084,15 +930,12 @@ const StudentPage = {
     },
     
     renderReport() {
-        const report = this.realData.report;
-        const weak = (report && report.weak_knowledge_areas) || MockData.weakKnowledge;
-        const mastered = MockData.masteredKnowledge;
         return `
         <div class="space-y-4">
             <div class="gradient-primary text-white rounded-2xl p-5 shadow-soft">
                 <div class="text-sm opacity-90">📊 成长报告</div>
-                <div class="text-xl font-bold mt-1">${(MockData.currentUser && MockData.currentUser.username) || '学生'}的学习分析</div>
-                <div class="text-sm opacity-80 mt-1">基于真实答题记录生成</div>
+                <div class="text-xl font-bold mt-1">${MockData.currentUser.name}的学习分析</div>
+                <div class="text-sm opacity-80 mt-1">报告时间: 2026-07-27</div>
             </div>
             
             <div class="bg-white rounded-2xl p-4 shadow-soft">
@@ -1105,7 +948,7 @@ const StudentPage = {
             <div class="bg-white rounded-2xl p-4 shadow-soft">
                 <div class="font-bold mb-3">⚠️ 薄弱知识点</div>
                 <div class="space-y-2">
-                    ${weak.map(k => `
+                    ${MockData.weakKnowledge.map(k => `
                         <div class="p-3 bg-red-50 rounded-xl border border-red-100">
                             <div class="flex items-center justify-between mb-1">
                                 <span class="font-medium text-sm">${k.title}</span>
@@ -1118,9 +961,7 @@ const StudentPage = {
                                 <div class="mt-2 text-xs text-orange-600">
                                     💡 常见错因: ${k.error_causes.join(', ')}
                                 </div>
-                            ` : (k.error_count !== undefined ? `
-                                <div class="mt-2 text-xs text-orange-600">💡 累计错误 ${k.error_count} 次</div>
-                            ` : '')}
+                            ` : ''}
                         </div>
                     `).join('')}
                 </div>
@@ -1134,7 +975,7 @@ const StudentPage = {
             <div class="bg-white rounded-2xl p-4 shadow-soft">
                 <div class="font-bold mb-3">💪 已掌握知识点</div>
                 <div class="grid grid-cols-2 gap-2">
-                    ${mastered.map(k => `
+                    ${MockData.masteredKnowledge.map(k => `
                         <div class="p-2 bg-green-50 rounded-lg text-center">
                             <div class="text-sm font-medium">${k.title}</div>
                             <div class="text-xs text-green-600">${k.mastery_level}%</div>
@@ -1157,17 +998,15 @@ const StudentPage = {
     
     initReportCharts() {
         setTimeout(() => {
-            const report = this.realData.report;
-            const dims = (report && report.five_dimension_scores) || MockData.fiveDimensionScores.dimensions;
             const radarCtx = document.getElementById('radarChart');
             if (radarCtx) {
                 new Chart(radarCtx, {
                     type: 'radar',
                     data: {
-                        labels: dims.map(d => d.label || d.dimension),
+                        labels: ['运算能力', '逻辑思维', '空间想象', '语言推理', '学习韧性'],
                         datasets: [{
                             label: '能力评分',
-                            data: dims.map(d => d.score),
+                            data: MockData.fiveDimensionScores.dimensions.map(d => d.score),
                             backgroundColor: 'rgba(102, 126, 234, 0.2)',
                             borderColor: 'rgba(102, 126, 234, 1)',
                             borderWidth: 2,
@@ -1190,10 +1029,10 @@ const StudentPage = {
                 new Chart(barCtx, {
                     type: 'bar',
                     data: {
-                        labels: dims.map(d => d.label || d.dimension),
+                        labels: MockData.fiveDimensionScores.dimensions.map(d => d.label),
                         datasets: [{
                             label: '当前水平',
-                            data: dims.map(d => d.score),
+                            data: MockData.fiveDimensionScores.dimensions.map(d => d.score),
                             backgroundColor: ['#f5576c', '#ffc107', '#28a745', '#17a2b8', '#6f42c1']
                         }]
                     },

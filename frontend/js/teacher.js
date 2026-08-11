@@ -239,10 +239,11 @@ const TeacherPage = {
         }
 
         this.isLoading = false;
+        await this.loadBatches();
         if (content) {
             content.innerHTML = this.render();
         }
-        
+
         await new Promise(resolve => setTimeout(resolve, 100));
         this.navigate('dashboard');
     },
@@ -476,66 +477,204 @@ const TeacherPage = {
     },
 
     renderAssignments() {
-        const students = this.currentStudents;
-        const studentCount = students.length;
+        const batches = this.batches || [];
+        const statusLabel = { locked: '🔒 未放行', partial: '🟡 部分放行', released: '✅ 已放行' };
+        const statusColor = { locked: 'bg-red-100 text-red-700', partial: 'bg-yellow-100 text-yellow-700', released: 'bg-green-100 text-green-600' };
 
         return `
-        <div class="space-y-4 pb-4">
-            <div onclick="TeacherPage.uploadAssignment()" class="card-hover gradient-info text-white rounded-2xl p-4 cursor-pointer shadow-soft">
+        <div class="space-y-4 pb-20">
+            <div onclick="TeacherPage.showCreateBatchModal()" class="card-hover gradient-primary text-white rounded-2xl p-4 cursor-pointer shadow-soft">
                 <div class="flex items-center gap-3">
                     <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-2xl">📤</div>
                     <div>
-                        <div class="font-bold">上传今日作业</div>
-                        <div class="text-sm opacity-90">选择题库中的题目发布作业</div>
+                        <div class="font-bold">创建作业批次</div>
+                        <div class="text-sm opacity-90">从题库选题，创建批次后答案默认锁定</div>
                     </div>
                 </div>
             </div>
 
+            ${batches.length === 0 ? `
+            <div class="bg-white rounded-2xl p-8 shadow-soft text-center text-gray-400">
+                <div class="text-4xl mb-2">📋</div>
+                <div>暂无作业批次</div>
+            </div>` : batches.map(b => `
             <div class="bg-white rounded-2xl p-4 shadow-soft">
-                <div class="font-bold mb-3">📋 近期作业</div>
-                <div class="space-y-3">
-                    ${MockData.getTeacherDashboard(1).recentAssignments.map(a => `
-                        <div class="p-3 border rounded-xl">
-                            <div class="flex items-start justify-between mb-2">
-                                <div>
-                                    <div class="font-medium">${a.title}</div>
-                                    <div class="text-xs text-gray-500">${a.knowledge} · ${a.date}</div>
-                                </div>
-                                <span class="badge ${a.correct_rate >= 70 ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}">
-                                    ${a.correct_rate}% 正确率
-                                </span>
-                            </div>
-                            <div class="flex gap-4 text-xs text-gray-500">
-                                <span>提交: ${a.submit_count}/${studentCount || a.submit_count}</span>
-                                <span>剩余: ${(studentCount || a.submit_count) - a.submit_count}</span>
-                            </div>
-                        </div>
-                    `).join('')}
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <div class="font-bold">${b.batch_id}</div>
+                        <div class="text-xs text-gray-500">${b.batch_date} · ${b.question_count}道题</div>
+                    </div>
+                    <span class="badge ${statusColor[b.release_status] || ''}">${statusLabel[b.release_status] || b.release_status}</span>
+                </div>
+                ${b.release_status === 'locked' ? `
+                <div class="flex gap-2">
+                    <button onclick="TeacherPage.releaseBatch('${b.batch_id}')" class="flex-1 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600">
+                        🔓 一键放行全部
+                    </button>
+                    <button onclick="TeacherPage.showPartialReleaseModal('${b.batch_id}', ${b.question_count})" class="flex-1 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600">
+                        🔍 精细放行
+                    </button>
+                </div>` : b.release_status === 'partial' ? `
+                <div class="flex gap-2">
+                    <button onclick="TeacherPage.releaseBatch('${b.batch_id}')" class="flex-1 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600">
+                        🔓 放行剩余题目
+                    </button>
+                </div>` : `
+                <div class="text-sm text-green-600">全部题目答案已对学生可见</div>`}
+            </div>
+            `).join('')}
+
+            <div id="batch-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+                <div class="bg-white rounded-2xl w-11/12 max-w-md max-h-96 overflow-y-auto p-4">
+                    <div class="font-bold mb-3">创建作业批次</div>
+                    <div id="batch-question-list" class="space-y-2 mb-4">
+                        <div class="text-gray-400 text-sm">加载题目中...</div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="TeacherPage.confirmCreateBatch()" class="flex-1 py-2 gradient-primary text-white rounded-lg font-medium">确认创建</button>
+                        <button onclick="document.getElementById('batch-modal').classList.add('hidden')" class="py-2 px-4 bg-gray-200 rounded-lg">取消</button>
+                    </div>
                 </div>
             </div>
 
-            <div class="bg-white rounded-2xl p-4 shadow-soft">
-                <div class="font-bold mb-3">👥 学生提交状态</div>
-                <div class="space-y-2">
-                    <div class="flex items-center justify-between p-2 bg-green-50 rounded-lg">
-                        <div class="text-sm">✅ 已提交 (${Math.floor(studentCount * 0.85)}人)</div>
-                        <button class="text-xs text-green-600">查看详情</button>
-                    </div>
-                    <div class="flex items-center justify-between p-2 bg-orange-50 rounded-lg">
-                        <div class="text-sm">⏳ 待批改 (${Math.floor(studentCount * 0.78)}人)</div>
-                        <button class="text-xs text-orange-600">批量批改</button>
-                    </div>
-                    <div class="flex items-center justify-between p-2 bg-red-50 rounded-lg">
-                        <div class="text-sm">❌ 未提交 (${Math.floor(studentCount * 0.15)}人)</div>
-                        <button class="text-xs text-red-600">提醒学生</button>
+            <div id="partial-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+                <div class="bg-white rounded-2xl w-11/12 max-w-md max-h-96 overflow-y-auto p-4">
+                    <div class="font-bold mb-3">精细放行 - 选择题目</div>
+                    <div id="partial-question-list" class="space-y-2 mb-4"></div>
+                    <div class="flex gap-2">
+                        <button onclick="TeacherPage.confirmPartialRelease()" class="flex-1 py-2 bg-blue-500 text-white rounded-lg font-medium">确认放行选中题目</button>
+                        <button onclick="document.getElementById('partial-modal').classList.add('hidden')" class="py-2 px-4 bg-gray-200 rounded-lg">取消</button>
                     </div>
                 </div>
             </div>
         </div>`;
     },
 
-    uploadAssignment() {
-        alert('📤 上传作业功能\n\n此功能将：\n1. 选择知识点\n2. 从题库中选取题目\n3. 设置截止时间\n4. 发布给全班\n\n（需对接题库管理模块）');
+    // ============ 批次管理方法 ============
+
+    batches: [],
+    _selectedQuestions: [],
+    _partialBatchId: null,
+    _partialQuestions: [],
+
+    async loadBatches() {
+        // 批次数据暂时存内存，后续可加 API 查询
+        this.batches = this.batches || [];
+    },
+
+    async showCreateBatchModal() {
+        const modal = document.getElementById('batch-modal');
+        if (!modal) return;
+        modal.classList.remove('hidden');
+
+        const listEl = document.getElementById('batch-question-list');
+        listEl.innerHTML = '<div class="text-gray-400 text-sm">加载题目中...</div>';
+
+        try {
+            const grade = MockData.currentUser?.grade || 3;
+            const result = await Api.getQuestionsForBatch(grade, null, 1, 20);
+            const questions = result.data || [];
+            this._availableQuestions = questions.slice(0, 8);
+
+            listEl.innerHTML = this._availableQuestions.map((q, i) => `
+                <label class="flex items-center gap-2 p-2 border rounded-lg cursor-pointer hover:bg-gray-50">
+                    <input type="checkbox" class="batch-q-check" data-index="${i}" onchange="TeacherPage._onQuestionToggle()">
+                    <span class="text-sm flex-1">${q.text || q.name || q.id}</span>
+                    <span class="text-xs text-gray-400">${q.id}</span>
+                </label>
+            `).join('');
+        } catch (e) {
+            listEl.innerHTML = '<div class="text-red-500 text-sm">加载失败: ' + e.message + '</div>';
+        }
+    },
+
+    _onQuestionToggle() {
+        const checks = document.querySelectorAll('.batch-q-check:checked');
+        this._selectedQuestions = Array.from(checks).map(cb => this._availableQuestions[parseInt(cb.dataset.index)]);
+    },
+
+    async confirmCreateBatch() {
+        if (this._selectedQuestions.length === 0) {
+            alert('请至少选择一道题目');
+            return;
+        }
+
+        const user = MockData.currentUser;
+        const className = this.currentClassName || '';
+        const questionIds = this._selectedQuestions.map(q => q.id);
+
+        try {
+            const result = await Api.createHomeworkBatch(
+                className, user?.id || 'T-001', new Date().toISOString().split('T')[0], questionIds
+            );
+            alert('批次创建成功: ' + result.batch_id + '\n状态: 答案已锁定(locked)\n题目数: ' + result.question_count);
+            this.batches.unshift(result);
+            document.getElementById('batch-modal').classList.add('hidden');
+            this._selectedQuestions = [];
+            this.navigate('assignments');
+        } catch (e) {
+            alert('创建失败: ' + e.message);
+        }
+    },
+
+    async releaseBatch(batchId) {
+        if (!confirm('确认放行批次 ' + batchId + ' 的全部答案？放行后学生将能看到完整答案。')) return;
+        try {
+            await Api.releaseHomeworkBatch(batchId);
+            alert('已全部放行');
+            const b = this.batches.find(x => x.batch_id === batchId);
+            if (b) b.release_status = 'released';
+            this.navigate('assignments');
+        } catch (e) {
+            alert('放行失败: ' + e.message);
+        }
+    },
+
+    async showPartialReleaseModal(batchId, questionCount) {
+        this._partialBatchId = batchId;
+        this._partialQuestions = [];
+
+        const modal = document.getElementById('partial-modal');
+        if (!modal) return;
+        modal.classList.remove('hidden');
+
+        const listEl = document.getElementById('partial-question-list');
+        try {
+            const result = await Api.getQuestionsForBatch(null, null, 1, questionCount);
+            const questions = (result.data || []).slice(0, questionCount);
+
+            listEl.innerHTML = questions.map((q, i) => `
+                <label class="flex items-center gap-2 p-2 border rounded-lg cursor-pointer hover:bg-gray-50">
+                    <input type="checkbox" class="partial-q-check" data-index="${i}" data-qid="${q.id}">
+                    <span class="text-sm flex-1">${q.text || q.name || q.id}</span>
+                    <span class="text-xs text-gray-400">${q.id}</span>
+                </label>
+            `).join('');
+            this._partialAvailableQuestions = questions;
+        } catch (e) {
+            listEl.innerHTML = '<div class="text-red-500 text-sm">加载失败</div>';
+        }
+    },
+
+    async confirmPartialRelease() {
+        const checks = document.querySelectorAll('.partial-q-check:checked');
+        const qids = Array.from(checks).map(cb => cb.dataset.qid);
+
+        if (qids.length === 0) {
+            alert('请至少选择一道要放行的题目');
+            return;
+        }
+
+        try {
+            await Api.releaseHomeworkBatchPartial(this._partialBatchId, qids);
+            alert('已放行 ' + qids.length + ' 道题目');
+            const b = this.batches.find(x => x.batch_id === this._partialBatchId);
+            if (b) b.release_status = 'partial';
+            document.getElementById('partial-modal').classList.add('hidden');
+            this.navigate('assignments');
+        } catch (e) {
+            alert('放行失败: ' + e.message);
+        }
     },
 
     renderMistakes() {

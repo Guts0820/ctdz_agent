@@ -109,7 +109,7 @@ const LoginPage = {
         document.getElementById('login-error').classList.add('hidden');
     },
     
-    async login() {
+    login() {
         const accountId = document.getElementById('account-select').value;
         const password = document.getElementById('password-input').value;
         
@@ -117,37 +117,25 @@ const LoginPage = {
             this.showError('请选择账号并输入密码');
             return;
         }
-
-        try {
-            const res = await Api.login(accountId, password);
-            this.onLoginSuccess(res, accountId, password);
-        } catch (error) {
-            // Demo 便捷：账号不存在时自动注册后再登录；生产环境应提示用户注册。
-            try {
-                await Api.register(accountId, password);
-                const res = await Api.login(accountId, password);
-                this.onLoginSuccess(res, accountId, password);
-            } catch (registerError) {
-                this.showError('账号或密码错误');
+        
+        let user = null;
+        if (this.selectedRole === 'student') {
+            user = MockData.users.students.find(s => s.id === accountId && s.password === password);
+        } else if (this.selectedRole === 'teacher') {
+            user = MockData.users.teachers.find(t => t.id === accountId && t.password === password);
+        } else if (this.selectedRole === 'admin') {
+            user = MockData.users.admins.find(a => a.id === accountId && a.password === password);
+        }
+        
+        if (user) {
+            MockData.currentUser = { ...user, role: this.selectedRole };
+            if (this.selectedRole === 'teacher' && user.classIds && user.classIds.length > 0) {
+                MockData.currentClass = user.classIds[0];
             }
+            App.loginSuccess(this.selectedRole);
+        } else {
+            this.showError('账号或密码错误');
         }
-    },
-
-    onLoginSuccess(res, username, password) {
-        const user = (res && res.user) || {};
-        // 演示阶段：前端角色由登录页选择；studentId 固定映射到 example_db 的演示学生 S-0001，
-        // 真实产品中应由后端返回 user 与 student 的绑定关系。
-        MockData.currentUser = {
-            ...user,
-            id: this.selectedRole === 'student' ? 'S-0001' : user.id,
-            userId: user.id,
-            username: username,
-            role: this.selectedRole
-        };
-        if (this.selectedRole === 'teacher' && MockData.users.teachers[0]) {
-            MockData.currentClass = MockData.users.teachers[0].classIds[0];
-        }
-        App.loginSuccess(this.selectedRole);
     },
     
     showError(msg) {
