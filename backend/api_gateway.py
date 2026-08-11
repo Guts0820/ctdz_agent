@@ -56,6 +56,23 @@ class SubmitResponse(BaseModel):
     status: str
     data: dict
 
+class CreateBatchRequest(BaseModel):
+    class_id: str
+    teacher_id: str
+    batch_date: str  # 格式: YYYY-MM-DD
+    question_ids: list[str]
+
+class BatchResponse(BaseModel):
+    batch_id: str
+    class_id: str
+    teacher_id: str
+    batch_date: str
+    release_status: str
+    question_count: int
+
+class ReleasePartialRequest(BaseModel):
+    question_ids: list[str]
+
 def get_db():
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
@@ -101,6 +118,40 @@ def lookup_question_standard_answer(question_id: Optional[str], original_questio
                 cache_set(cache_key, row["answer"])
                 return row["answer"]
     return None
+
+
+def is_answer_released(question_id: Optional[str]) -> bool:
+    """判断某道题的答案能否返回给学生。
+
+    True: 可以返回答案（已发布、精细放行过，或不属于任何受控批次）
+    False: 不能返回答案（批次锁定状态）
+    """
+    if not question_id:
+        return True
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            '''
+            SELECT hb.release_status
+            FROM homework_batch_question hbq
+            JOIN homework_batch hb ON hbq.batch_id = hb.batch_id
+            WHERE hbq.question_id = ?
+            ORDER BY hb.created_at DESC LIMIT 1
+            ''',
+            (question_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return True
+        if row["release_status"] == "released":
+            return True
+        if row["release_status"] == "partial":
+            cursor.execute(
+                "SELECT 1 FROM question_release_override WHERE question_id = ?",
+                (question_id,),
+            )
+            return cursor.fetchone() is not None
+        return False
 
 
 def build_judge_prompt(question_json: dict, standard_answer: str) -> tuple[str, str]:
@@ -237,34 +288,42 @@ def submit_homework(request: SubmitRequest):
         else:
             review_result = None
         
-        return SubmitResponse(
-            status="success",
-            data={
-                "judge_result": analysis_result["judge_result"],
-                "step_feedback": analysis_result["step_feedback"],
-                "error_step_list": analysis_result["error_step_list"],
-                "miss_step_list": analysis_result["miss_step_list"],
-                "is_copy": analysis_result["is_copy"],
-                "core_error_type": analysis_result["core_error_type"],
-                "confidence": analysis_result["confidence"],
-                "error_tags": error_analysis_result["error_tags"],
-                "knowledge_id": knowledge_id,
-                "knowledge_scope": error_analysis_result["knowledge_scope"],
-                "knowledge_explanation": knowledge_result["knowledge_explanation"],
-                "difficulty": knowledge_result["difficulty"],
-                "standard_solution": knowledge_result["standard_solution"],
-                "explanation": teaching_result["explanation"],
-                "hints": teaching_result["hints"],
-                "practice_list": teaching_result["practice_list"],
-                "teaching_mode": teaching_result["teaching_mode"],
-                "master_level": state_before["master_level"],
-                "next_action": state_before["next_action"],
-                "correct_count": state_before["correct_count"],
-                "wrong_count": state_before["wrong_count"],
-                "mastery_status": state_before["mastery_status"],
-                "review_plan": review_result
-            }
-        )
+        response_data = {
+            "judge_result": analysis_result["judge_result"],
+            "step_feedback": analysis_result["step_feedback"],
+            "error_step_list": analysis_result["error_step_list"],
+            "miss_step_list": analysis_result["miss_step_list"],
+            "is_copy": analysis_result["is_copy"],
+            "core_error_type": analysis_result["core_error_type"],
+            "confidence": analysis_result["confidence"],
+            "error_tags": error_analysis_result["error_tags"],
+            "knowledge_id": knowledge_id,
+            "knowledge_scope": error_analysis_result["knowledge_scope"],
+            "knowledge_explanation": knowledge_result["knowledge_explanation"],
+            "difficulty": knowledge_result["difficulty"],
+            "standard_solution": knowledge_result["standard_solution"],
+            "explanation": teaching_result["explanation"],
+            "hints": teaching_result["hints"],
+            "practice_list": teaching_result["practice_list"],
+            "teaching_mode": teaching_result["teaching_mode"],
+            "master_level": state_before["master_level"],
+            "next_action": state_before["next_action"],
+            "correct_count": state_before["correct_count"],
+            "wrong_count": state_before["wrong_count"],
+            "mastery_status": state_before["mastery_status"],
+            "review_plan": review_result
+        }
+
+        # 答案权限过滤：题目答案未放行时，隐藏标准答案与完整讲解
+        if not is_answer_released(question_id):
+            response_data["standard_solution"] = None
+            response_data["explanation"] = "老师还没放行答案，请先自己订正并再次提交。"
+            response_data["hints"] = []
+            response_data["answer_released"] = False
+        else:
+            response_data["answer_released"] = True
+
+        return SubmitResponse(status="success", data=response_data)
     
     except requests.HTTPError as e:
         status = e.response.status_code if e.response is not None else 500
@@ -392,6 +451,153 @@ def get_student_mastery(student_id: str):
     response = requests.get(url, timeout=HTTP_TIMEOUT_SECONDS)
     response.raise_for_status()
     return response.json()
+
+# ==================== 教师端批次管理接口（移植自同事仓库） ====================
+
+@app.post("/api/v1/teacher/homework_batch", response_model=BatchResponse)
+def create_homework_batch(request: CreateBatchRequest):
+    """创建作业批次，默认锁定（locked），学生看不到完整答案。"""
+    batch_id = generate_id("HB")
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            '''
+            INSERT INTO homework_batch (batch_id, class_id, teacher_id, batch_date, release_status, created_at)
+            VALUES (?, ?, ?, ?, 'locked', ?)
+            ''',
+            (batch_id, request.class_id, request.teacher_id, request.batch_date, datetime.now().isoformat()),
+        )
+        for qid in request.question_ids:
+            cursor.execute(
+                "INSERT INTO homework_batch_question (batch_id, question_id) VALUES (?, ?)",
+                (batch_id, qid),
+            )
+        conn.commit()
+    return BatchResponse(
+        batch_id=batch_id,
+        class_id=request.class_id,
+        teacher_id=request.teacher_id,
+        batch_date=request.batch_date,
+        release_status="locked",
+        question_count=len(request.question_ids),
+    )
+
+
+@app.post("/api/v1/teacher/homework_batch/{batch_id}/release")
+def release_batch(batch_id: str):
+    """一键放行整批作业。"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT batch_id FROM homework_batch WHERE batch_id = ?", (batch_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"批次不存在: {batch_id}")
+        cursor.execute(
+            "UPDATE homework_batch SET release_status = 'released', release_time = ? WHERE batch_id = ?",
+            (datetime.now().isoformat(), batch_id),
+        )
+        conn.commit()
+    return {"status": "success", "message": f"批次 {batch_id} 已全部放行", "release_status": "released"}
+
+
+@app.post("/api/v1/teacher/homework_batch/{batch_id}/release_partial")
+def release_batch_partial(batch_id: str, request: ReleasePartialRequest):
+    """精细放行部分题目。"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT batch_id FROM homework_batch WHERE batch_id = ?", (batch_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"批次不存在: {batch_id}")
+        for qid in request.question_ids:
+            cursor.execute(
+                "INSERT OR IGNORE INTO question_release_override (batch_id, question_id, released_at) VALUES (?, ?, ?)",
+                (batch_id, qid, datetime.now().isoformat()),
+            )
+        cursor.execute(
+            "UPDATE homework_batch SET release_status = 'partial', release_time = ? WHERE batch_id = ?",
+            (datetime.now().isoformat(), batch_id),
+        )
+        conn.commit()
+    return {
+        "status": "success",
+        "message": f"已放行 {len(request.question_ids)} 道题目",
+        "release_status": "partial",
+        "released_count": len(request.question_ids),
+    }
+
+
+@app.get("/api/v1/teacher/homework_batch")
+def list_homework_batches(class_id: Optional[str] = None, teacher_id: Optional[str] = None):
+    """列出作业批次（含批次内题目），教师端展示用。"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        sql = "SELECT * FROM homework_batch WHERE 1=1"
+        params: list = []
+        if class_id:
+            sql += " AND class_id = ?"
+            params.append(class_id)
+        if teacher_id:
+            sql += " AND teacher_id = ?"
+            params.append(teacher_id)
+        sql += " ORDER BY created_at DESC"
+        batches = [dict(row) for row in cursor.execute(sql, params).fetchall()]
+        for b in batches:
+            rows = cursor.execute(
+                "SELECT question_id FROM homework_batch_question WHERE batch_id = ?",
+                (b["batch_id"],),
+            ).fetchall()
+            b["question_ids"] = [r["question_id"] for r in rows]
+    return {"status": "success", "data": batches}
+
+
+@app.get("/api/questions")
+def list_questions(
+    grade: Optional[str] = None,
+    knowledge_id: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+):
+    """题库列表（SQLite），供教师端创建作业批次时选题。"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        where = ["1=1"]
+        params: list = []
+        if grade:
+            where.append("q.grade = ?")
+            params.append(grade)
+        if knowledge_id:
+            where.append("qkm.knowledge_id = ?")
+            params.append(knowledge_id)
+        where_sql = " AND ".join(where)
+        total = cursor.execute(
+            f"SELECT COUNT(*) FROM question q LEFT JOIN question_knowledge_mapping qkm ON q.question_id = qkm.question_id WHERE {where_sql}",
+            params,
+        ).fetchone()[0]
+        rows = cursor.execute(
+            f'''
+            SELECT q.question_id, q.question_description, q.question_type, q.difficulty,
+                   q.grade, q.textbook_version, qkm.knowledge_id
+            FROM question q
+            LEFT JOIN question_knowledge_mapping qkm ON q.question_id = qkm.question_id
+            WHERE {where_sql}
+            ORDER BY q.question_id
+            LIMIT ? OFFSET ?
+            ''',
+            params + [page_size, (max(page, 1) - 1) * page_size],
+        ).fetchall()
+    questions = [
+        {
+            "id": r["question_id"],
+            "text": r["question_description"],
+            "question_type": r["question_type"],
+            "difficulty": r["difficulty"],
+            "grade": r["grade"],
+            "textbook_version": r["textbook_version"],
+            "knowledge_id": r["knowledge_id"],
+        }
+        for r in rows
+    ]
+    return {"status": "success", "data": questions, "total": total, "page": page, "page_size": page_size}
+
 
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 async def insight_proxy(path: str, request: Request):

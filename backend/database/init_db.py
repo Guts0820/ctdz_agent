@@ -172,6 +172,36 @@ CREATE TABLE IF NOT EXISTS frequency_limit (
     FOREIGN KEY (student_id) REFERENCES students(student_id),
     FOREIGN KEY (knowledge_id) REFERENCES knowledge(knowledge_id)
 );
+
+-- 作业批次表（教师端批次管理与答案放行）
+CREATE TABLE IF NOT EXISTS homework_batch (
+    batch_id VARCHAR(32) PRIMARY KEY,
+    class_id VARCHAR(32),
+    teacher_id VARCHAR(32),
+    batch_date DATE,
+    release_status VARCHAR(20) DEFAULT 'locked',
+    release_time DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 批次题目关联表
+CREATE TABLE IF NOT EXISTS homework_batch_question (
+    batch_id VARCHAR(32),
+    question_id VARCHAR(32),
+    PRIMARY KEY (batch_id, question_id),
+    FOREIGN KEY (batch_id) REFERENCES homework_batch(batch_id),
+    FOREIGN KEY (question_id) REFERENCES question(question_id)
+);
+
+-- 题目发布覆盖表（精细放行）
+CREATE TABLE IF NOT EXISTS question_release_override (
+    batch_id VARCHAR(32),
+    question_id VARCHAR(32),
+    released_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (batch_id, question_id),
+    FOREIGN KEY (batch_id) REFERENCES homework_batch(batch_id),
+    FOREIGN KEY (question_id) REFERENCES question(question_id)
+);
 '''
 
 INITIAL_DATA = {
