@@ -243,7 +243,7 @@ const TeacherPage = {
         if (content) {
             content.innerHTML = this.render();
         }
-
+        
         await new Promise(resolve => setTimeout(resolve, 100));
         this.navigate('dashboard');
     },
@@ -482,8 +482,8 @@ const TeacherPage = {
         const statusColor = { locked: 'bg-red-100 text-red-700', partial: 'bg-yellow-100 text-yellow-700', released: 'bg-green-100 text-green-600' };
 
         return `
-        <div class="space-y-4 pb-20">
-            <div onclick="TeacherPage.showCreateBatchModal()" class="card-hover gradient-primary text-white rounded-2xl p-4 cursor-pointer shadow-soft">
+        <div class="space-y-4 pb-4">
+            <div onclick="TeacherPage.showCreateBatchModal()" class="card-hover gradient-info text-white rounded-2xl p-4 cursor-pointer shadow-soft">
                 <div class="flex items-center gap-3">
                     <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-2xl">📤</div>
                     <div>
@@ -526,12 +526,10 @@ const TeacherPage = {
 
             <div id="batch-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
                 <div class="bg-white rounded-2xl w-11/12 max-w-md max-h-96 overflow-y-auto p-4">
-                    <div class="font-bold mb-3">创建作业批次</div>
-                    <div id="batch-question-list" class="space-y-2 mb-4">
-                        <div class="text-gray-400 text-sm">加载题目中...</div>
-                    </div>
+                    <div class="font-bold mb-3">选择题目创建批次</div>
+                    <div id="batch-question-list" class="space-y-2 mb-4"></div>
                     <div class="flex gap-2">
-                        <button onclick="TeacherPage.confirmCreateBatch()" class="flex-1 py-2 gradient-primary text-white rounded-lg font-medium">确认创建</button>
+                        <button onclick="TeacherPage.confirmCreateBatch()" class="flex-1 py-2 bg-blue-500 text-white rounded-lg font-medium">确认创建批次</button>
                         <button onclick="document.getElementById('batch-modal').classList.add('hidden')" class="py-2 px-4 bg-gray-200 rounded-lg">取消</button>
                     </div>
                 </div>
@@ -550,7 +548,7 @@ const TeacherPage = {
         </div>`;
     },
 
-    // ============ 批次管理方法 ============
+    // ============ 批次管理方法（移植自同事仓库） ============
 
     batches: [],
     _selectedQuestions: [],
@@ -558,8 +556,14 @@ const TeacherPage = {
     _partialQuestions: [],
 
     async loadBatches() {
-        // 批次数据暂时存内存，后续可加 API 查询
-        this.batches = this.batches || [];
+        try {
+            const user = MockData.currentUser;
+            const result = await Api.getHomeworkBatches(this.currentClassName, user?.id);
+            this.batches = result.data || [];
+        } catch (e) {
+            console.error('Failed to load batches:', e);
+            this.batches = [];
+        }
     },
 
     async showCreateBatchModal() {

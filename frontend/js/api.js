@@ -4,13 +4,14 @@ const Api = {
     async fetch(endpoint, options = {}) {
         try {
             const url = API_BASE + endpoint;
-            const response = await fetch(url, {
+            const withCredentials = {
+                ...options,
                 headers: {
                     'Content-Type': 'application/json',
-                    ...options.headers
-                },
-                ...options
-            });
+                    ...(options.headers || {})
+                }
+            };
+            const response = await fetch(url, withCredentials);
             if (!response.ok) {
                 throw new Error('API请求失败: ' + response.status);
             }
@@ -19,6 +20,34 @@ const Api = {
             console.error('API Error:', error);
             throw error;
         }
+    },
+
+    // ============ 账号 API（走网关 8000 统一入口） ============
+
+    async login(username, password) {
+        return this.fetch('/login', {
+            method: 'POST',
+            body: JSON.stringify({ username, password })
+        });
+    },
+
+    async register(username, password, grade = null, semester = null) {
+        return this.fetch('/register', {
+            method: 'POST',
+            body: JSON.stringify({ username, password, grade, semester })
+        });
+    },
+
+    // ============ 错题提交 API（网关本地处理：OCR + 判题） ============
+
+    async submitHomework(studentId, imageDataUrl) {
+        return this.fetch('/v1/submit', {
+            method: 'POST',
+            body: JSON.stringify({
+                student_id: studentId,
+                image: imageDataUrl
+            })
+        });
     },
 
     async getStudents(grade, className) {
@@ -38,7 +67,7 @@ const Api = {
     },
 
     async getStudentMastery(studentId) {
-        return this.fetch('/students/' + studentId + '/mastery');
+        return this.fetch('/v1/student/' + studentId + '/mastery');
     },
 
     async getStudentWeakPoints(studentId, threshold = 60) {
@@ -64,11 +93,11 @@ const Api = {
     },
 
     async getGrowthReport(studentId) {
-        return this.fetch('/datahub/growth_report/' + studentId);
+        return this.fetch('/growth_report/' + studentId);
     },
 
     async getLearningPath(studentId) {
-        return this.fetch('/datahub/learning_path/' + studentId);
+        return this.fetch('/learning_path/' + studentId);
     },
 
     async getStatisticsOverview() {
@@ -78,7 +107,7 @@ const Api = {
     // ============ 复习计划 API ============
 
     async calculatePriority(studentId) {
-        return this.fetch('/priority-runs', {
+        return this.fetch('/v1/priority-runs', {
             method: 'POST',
             body: JSON.stringify({ student_id: studentId })
         });
@@ -94,47 +123,47 @@ const Api = {
         } else if (mode === 'time_limit') {
             body.time_limit_minutes = timeLimitMinutes || 30;
         }
-        return this.fetch('/review-plans', {
+        return this.fetch('/v1/review-plans', {
             method: 'POST',
             body: JSON.stringify(body)
         });
     },
 
     async getReviewPlan(planId) {
-        return this.fetch('/review-plans/' + planId);
+        return this.fetch('/v1/review-plans/' + planId);
     },
 
     async updateReviewPlanCapacity(planId, questionCount) {
-        return this.fetch('/review-plans/' + planId + '/capacity', {
+        return this.fetch('/v1/review-plans/' + planId + '/capacity', {
             method: 'PATCH',
             body: JSON.stringify({ question_count: questionCount })
         });
     },
 
     async startReviewSession(planId) {
-        return this.fetch('/review-plans/' + planId + '/start', {
+        return this.fetch('/v1/review-plans/' + planId + '/start', {
             method: 'POST'
         });
     },
 
     async getReviewSession(sessionId) {
-        return this.fetch('/review-sessions/' + sessionId);
+        return this.fetch('/v1/review-sessions/' + sessionId);
     },
 
     async pauseReviewSession(sessionId) {
-        return this.fetch('/review-sessions/' + sessionId + '/pause', {
+        return this.fetch('/v1/review-sessions/' + sessionId + '/pause', {
             method: 'POST'
         });
     },
 
     async resumeReviewSession(sessionId) {
-        return this.fetch('/review-sessions/' + sessionId + '/resume', {
+        return this.fetch('/v1/review-sessions/' + sessionId + '/resume', {
             method: 'POST'
         });
     },
 
     async submitAttempt(sessionId, questionId, selectedOption, timeSpentSeconds) {
-        return this.fetch('/review-sessions/' + sessionId + '/attempts', {
+        return this.fetch('/v1/review-sessions/' + sessionId + '/attempts', {
             method: 'POST',
             body: JSON.stringify({
                 question_id: questionId,
@@ -145,7 +174,7 @@ const Api = {
     },
 
     async submitCorrection(attemptId, selectedOption) {
-        return this.fetch('/attempts/' + attemptId + '/correction', {
+        return this.fetch('/v1/attempts/' + attemptId + '/correction', {
             method: 'POST',
             body: JSON.stringify({
                 selected_option: selectedOption
@@ -241,7 +270,7 @@ const Api = {
         });
     },
 
-    // ============ 作业批次管理 API ============
+    // ============ 作业批次管理 API（教师端） ============
 
     async createHomeworkBatch(classId, teacherId, batchDate, questionIds) {
         return this.fetch('/v1/teacher/homework_batch', {
@@ -253,6 +282,14 @@ const Api = {
                 question_ids: questionIds
             })
         });
+    },
+
+    async getHomeworkBatches(classId, teacherId) {
+        let params = [];
+        if (classId) params.push('class_id=' + encodeURIComponent(classId));
+        if (teacherId) params.push('teacher_id=' + encodeURIComponent(teacherId));
+        const query = params.length > 0 ? '?' + params.join('&') : '';
+        return this.fetch('/v1/teacher/homework_batch' + query);
     },
 
     async releaseHomeworkBatch(batchId) {
