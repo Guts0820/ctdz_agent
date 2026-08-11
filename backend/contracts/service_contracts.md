@@ -111,10 +111,20 @@ INPUT (学生提交作业)
 
 | 接口 | HTTP方法 | 路径 | 描述 |
 |------|---------|------|------|
-| OCR识别 | POST | `/ocr` | 将图片转换为文本 |
+| OCR识别 | 内部转发 | 独立服务 `/v1/recognize` | 将图片转为 Markdown |
 | 题目解析 | POST | `/parse` | 解析题目和学生答案 |
 | 过程批改 | POST | `/process-check` | 逐步批改学生作答 |
 | 完整分析 | POST | `/process` | 执行完整分析流程 |
+
+#### 独立手写 OCR 服务
+
+Analysis Service 在收到 `image` Data URL 后，解码为图片字节并调用独立服务，不再使用模拟 OCR。
+
+| 服务名称 | 端口 | 方法 | 路径 | 请求 | 响应关键字段 |
+|----------|------|------|------|------|--------------|
+| Handwriting OCR Service | 8087 | POST | `/v1/recognize` | `multipart/form-data`，字段 `image` | `markdown`、`confidence`、`engine`、`fallback_used`、`status` |
+
+OCR 调用地址由 `OCR_SERVICE_URL` 配置，超时由 `OCR_TIMEOUT_SECONDS` 配置。图片格式限定为 JPEG、PNG、WebP、BMP；OCR 服务不可达时 Analysis Service 返回 HTTP 503，网关必须保持该状态码。
 
 #### 完整分析接口
 

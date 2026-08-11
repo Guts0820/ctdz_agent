@@ -1,5 +1,7 @@
 import json
 import time
+import base64
+import binascii
 from datetime import datetime
 from typing import List, Optional
 try:
@@ -18,8 +20,9 @@ except ImportError:
             self.detail = detail
             super().__init__(detail)
 from pydantic import BaseModel
+import requests
 import sqlite3
-from backend.config import DATABASE_PATH
+from backend.config import DATABASE_PATH, OCR_SERVICE_URL, OCR_TIMEOUT_SECONDS
 from backend.services.observability import log_event, timed
 from id_utils import generate_id
 
@@ -49,6 +52,10 @@ class AnalysisResponse(BaseModel):
     text_status: str
     student_id: str
     question_id: Optional[str] = None
+    ocr_markdown: Optional[str] = None
+    ocr_engine: Optional[str] = None
+    ocr_fallback_used: Optional[bool] = None
+    ocr_status: Optional[str] = None
 
 def get_db():
     conn = sqlite3.connect(DATABASE)
@@ -62,7 +69,7 @@ def process_analysis(request: AnalysisRequest):
     if request.image is None and request.original_question is None:
         raise HTTPException(status_code=400, detail="Either image or original_question is required")
     
-    ocr_result = simulate_ocr(request)
+    ocr_result = recognize_submission(request)
     
     if ocr_result["text_status"] != "normal":
         raise HTTPException(
@@ -73,6 +80,12 @@ def process_analysis(request: AnalysisRequest):
     parse_result = simulate_parse(ocr_result)
     
     process_result = simulate_process_check(parse_result, request.standard_solve_steps)
+    process_result.update({
+        "ocr_markdown": ocr_result.get("ocr_markdown"),
+        "ocr_engine": ocr_result.get("ocr_engine"),
+        "ocr_fallback_used": ocr_result.get("ocr_fallback_used"),
+        "ocr_status": ocr_result.get("ocr_status"),
+    })
     
     with get_db() as conn:
         cursor = conn.cursor()
@@ -118,11 +131,22 @@ def process_analysis(request: AnalysisRequest):
     process_result["question_id"] = request.question_id
     return AnalysisResponse(**process_result)
 
-def simulate_ocr(request: AnalysisRequest) -> dict:
+def recognize_submission(request: AnalysisRequest) -> dict:
     if request.image:
-        text_status = "normal"
-        original_question = request.original_question or "小明有25颗糖果，小红有38颗糖果，他们一共有多少颗糖果？"
-        student_write = request.student_write or "25+38=53"
+        recognized = run_ocr(request.image)
+        markdown = str(recognized["markdown"]).strip()
+        text_status = "normal" if markdown else "empty"
+        original_question = request.original_question or markdown
+        student_write = request.student_write or markdown
+        return {
+            "text_status": text_status,
+            "original_question": original_question,
+            "student_write": student_write,
+            "ocr_markdown": markdown,
+            "ocr_engine": recognized.get("engine"),
+            "ocr_fallback_used": recognized.get("fallback_used"),
+            "ocr_status": recognized.get("status"),
+        }
     elif request.original_question:
         text_status = "normal"
         original_question = request.original_question
@@ -137,6 +161,57 @@ def simulate_ocr(request: AnalysisRequest) -> dict:
         "original_question": original_question,
         "student_write": student_write
     }
+
+
+def run_ocr(image: str) -> dict:
+    """Send a base64 Data URL to the dedicated OCR service and normalize its result."""
+    content_type, image_bytes = _decode_image(image)
+    extension = content_type.split("/", 1)[-1]
+    try:
+        response = requests.post(
+            f"{OCR_SERVICE_URL.rstrip('/')}/v1/recognize",
+            files={"image": (f"homework.{extension}", image_bytes, content_type)},
+            timeout=OCR_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        result = response.json()
+    except requests.HTTPError as error:
+        response = error.response
+        status_code = response.status_code if response is not None else 502
+        if 400 <= status_code < 500:
+            raise HTTPException(status_code=status_code, detail="OCR rejected the image.") from error
+        raise HTTPException(status_code=503, detail="OCR service is unavailable.") from error
+    except requests.RequestException as error:
+        raise HTTPException(status_code=503, detail="OCR service is unavailable.") from error
+    except ValueError as error:
+        raise HTTPException(status_code=502, detail="OCR service returned an invalid response.") from error
+
+    markdown = result.get("markdown")
+    if not isinstance(markdown, str):
+        raise HTTPException(status_code=502, detail="OCR service response has no markdown result.")
+
+    return {
+        "markdown": markdown,
+        "confidence": result.get("confidence"),
+        "engine": result.get("engine"),
+        "fallback_used": result.get("fallback_used"),
+        "status": result.get("status"),
+    }
+
+
+def _decode_image(image: str) -> tuple[str, bytes]:
+    prefix = "data:"
+    if not image.startswith(prefix) or ";base64," not in image:
+        raise HTTPException(status_code=400, detail="image must be a base64 Data URL.")
+
+    metadata, encoded = image.split(",", 1)
+    content_type = metadata[len(prefix):].split(";", 1)[0].lower()
+    if content_type not in {"image/jpeg", "image/png", "image/webp", "image/bmp"}:
+        raise HTTPException(status_code=415, detail="Unsupported image content type.")
+    try:
+        return content_type, base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error) as error:
+        raise HTTPException(status_code=400, detail="image is not valid base64 data.") from error
 
 def simulate_parse(ocr_result: dict) -> dict:
     return {

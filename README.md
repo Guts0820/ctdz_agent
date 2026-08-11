@@ -4,6 +4,7 @@
 
 ## 项目结构
 
+- `frontend/`：静态学生、教师和管理员端页面；拍照作业会调用 API 网关。
 - `backend/api_gateway.py`：统一入口，负责提交作业后的服务编排
 - `backend/services/analysis_service.py`：OCR/答题分析、判题基础结果生成
 - `backend/services/error_analysis_agent.py`：错因分析与错误标签生成
@@ -50,10 +51,14 @@ KNOWLEDGE_SERVICE_URL=http://127.0.0.1:8083
 TEACHING_SERVICE_URL=http://127.0.0.1:8084
 STATE_SERVICE_URL=http://127.0.0.1:8085
 KNOWLEDGE_GRAPH_URL=http://127.0.0.1:8007
+OCR_SERVICE_URL=http://127.0.0.1:8087
+OCR_SERVICE_URL=http://127.0.0.1:8087
 DEFAULT_GRADE=三年级
 DEFAULT_TEXTBOOK_VERSION=人教版
 LLM_TIMEOUT_SECONDS=60
 HTTP_TIMEOUT_SECONDS=10
+OCR_TIMEOUT_SECONDS=300
+OCR_TIMEOUT_SECONDS=300
 SERVICE_STARTUP_WAIT_SECONDS=3
 SERVICE_HEALTH_TIMEOUT_SECONDS=3
 REDIS_URL=redis://localhost:6379/0
@@ -70,6 +75,10 @@ LLM_SYSTEM_PROMPT=你是一个小学数学题目判题专家。你需要根据�
 - `KNOWLEDGE_CSV_PATH`：知识点 CSV 路径
 - `API_GATEWAY_PORT`：API 网关端口
 - `*_SERVICE_URL`：各内部服务地址
+- `OCR_SERVICE_URL`：独立手写 OCR 服务地址；分析服务将前端的 Data URL 转发至其 `/v1/recognize` 接口
+- `OCR_TIMEOUT_SECONDS`：OCR 推理超时；CPU 首次加载模型和复杂图片处理较慢，默认 300 秒
+- `OCR_SERVICE_URL`：独立手写 OCR 服务地址；分析服务将前端的 Data URL 转发至其 `/v1/recognize` 接口
+- `OCR_TIMEOUT_SECONDS`：OCR 推理超时；CPU 首次加载模型和复杂图片处理较慢，默认 300 秒
 - `KNOWLEDGE_GRAPH_URL`：知识图谱服务地址
 - `DEFAULT_GRADE` / `DEFAULT_TEXTBOOK_VERSION`：主流程默认年级与教材版本
 - `LLM_*`：大模型判题配置
@@ -106,8 +115,23 @@ python backend/start_all.py
 - State Service
 - Review Scheduler
 - API Gateway
+- Handwriting OCR Service（端口 8087，单 worker）
+- Handwriting OCR Service（端口 8087，单 worker）
 
-注意：当前仓库中未包含 `kg_service/` 目录，因此如果你没有单独补齐该服务，`start_all.py` 里启动知识图谱服务这一步会失败。其余服务仍可单独启动。
+注意：当前仓库中未包含 `kg_service/` 目录时，`start_all.py` 会提示并跳过知识图谱服务，其余服务仍可启动。
+OCR 服务依赖应按 `handwriting_ocr_service/README.md` 单独安装；`start_all.py` 会在依赖就绪后自动启动它。
+
+### 启动前端
+
+另开一个终端，在仓库根目录运行：
+
+```bash
+cd frontend
+python -m http.server 3000
+```
+
+浏览器访问 `http://127.0.0.1:3000`。网关已允许该本地地址跨域访问。
+OCR 服务依赖应按 `handwriting_ocr_service/README.md` 单独安装；`start_all.py` 会在依赖就绪后自动启动它。
 
 ### 方式二：单独启动某个服务
 

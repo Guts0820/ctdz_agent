@@ -5,6 +5,7 @@ from typing import Optional
 from uuid import uuid4
 try:
     from fastapi import FastAPI, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
 except ImportError:
     print("错误：无法导入 fastapi。请运行 'pip install fastapi' 安装依赖。", file=sys.stderr)
     sys.exit(1)
@@ -25,6 +26,13 @@ from llm_client import call_llm_json, get_default_system_prompt, llm_enabled
 from id_utils import generate_id
 
 app = FastAPI(title="AI Math Error Correction System API Gateway", version="1.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 SERVICE_URLS = service_urls()
 
@@ -123,6 +131,14 @@ def submit_homework(request: SubmitRequest):
     log_event("submit.request", request_id=request_id, student_id=request.student_id, question_id=request.question_id)
     try:
         analysis_result = call_analysis_service(request)
+        ocr_data = {
+            "ocr": {
+                "markdown": analysis_result.get("ocr_markdown"),
+                "engine": analysis_result.get("ocr_engine"),
+                "fallback_used": analysis_result.get("ocr_fallback_used"),
+                "status": analysis_result.get("ocr_status"),
+            }
+        } if analysis_result.get("ocr_markdown") is not None else {}
         standard_answer = lookup_question_standard_answer(request.question_id or analysis_result.get("question_id"), analysis_result.get("original_question"))
         if standard_answer and llm_enabled():
             question_json = {
@@ -152,6 +168,7 @@ def submit_homework(request: SubmitRequest):
             return SubmitResponse(
                 status="success",
                 data={
+                    **ocr_data,
                     "judge_result": analysis_result["judge_result"],
                     "is_copy": True,
                     "hints": guide_result.get("hints", []),
@@ -168,6 +185,7 @@ def submit_homework(request: SubmitRequest):
                 return SubmitResponse(
                     status="success",
                     data={
+                        **ocr_data,
                         "judge_result": "correct",
                         "step_feedback": analysis_result["step_feedback"],
                         "master_level": 1.0,
@@ -180,6 +198,7 @@ def submit_homework(request: SubmitRequest):
             return SubmitResponse(
                 status="success",
                 data={
+                    **ocr_data,
                     "judge_result": "correct",
                     "step_feedback": analysis_result["step_feedback"],
                     "knowledge_id": knowledge_id,
@@ -203,6 +222,7 @@ def submit_homework(request: SubmitRequest):
             return SubmitResponse(
                 status="success",
                 data={
+                    **ocr_data,
                     "judge_result": analysis_result["judge_result"],
                     "step_feedback": analysis_result["step_feedback"],
                     "error_tags": error_analysis_result["error_tags"],
@@ -226,6 +246,7 @@ def submit_homework(request: SubmitRequest):
         return SubmitResponse(
             status="success",
             data={
+                **ocr_data,
                 "judge_result": analysis_result["judge_result"],
                 "step_feedback": analysis_result["step_feedback"],
                 "error_step_list": analysis_result["error_step_list"],
@@ -252,6 +273,8 @@ def submit_homework(request: SubmitRequest):
             }
         )
     
+    except HTTPException:
+        raise
     except Exception as e:
         log_event("submit.error", request_id=request_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -266,9 +289,18 @@ def call_analysis_service(request: SubmitRequest) -> dict:
         "student_write": request.student_write,
         "text_status": "normal"
     }
-    response = requests.post(url, json=payload, timeout=HTTP_TIMEOUT_SECONDS)
-    response.raise_for_status()
-    return response.json()
+    try:
+        response = requests.post(url, json=payload, timeout=HTTP_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        return response.json()
+    except requests.HTTPError as error:
+        response = error.response
+        status_code = response.status_code if response is not None else 502
+        if 400 <= status_code < 600:
+            raise HTTPException(status_code=status_code, detail="Analysis service rejected the request.") from error
+        raise HTTPException(status_code=502, detail="Analysis service returned an invalid response.") from error
+    except requests.RequestException as error:
+        raise HTTPException(status_code=503, detail="Analysis service is unavailable.") from error
 
 def call_error_analysis_service(analysis_result: dict) -> dict:
     url = f"{SERVICE_URLS['error_analysis']}/internal/api/v1/error-analysis/analyze"

@@ -24,9 +24,32 @@ def start_service(name, script_path, port, log_dir="backend/logs"):
     print(f"  日志文件: {log_file_path}")
     return process
 
+
+def start_ocr_service(log_dir="backend/logs"):
+    """Start the independent OCR module in its own working directory."""
+    name = "Handwriting OCR Service"
+    ocr_directory = os.path.abspath("handwriting_ocr_service")
+    venv_python = os.path.join(ocr_directory, ".venv-vl", "Scripts", "python.exe")
+    python_executable = venv_python if os.path.exists(venv_python) else sys.executable
+    print(f"Starting {name} on port 8087...")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file_path = os.path.join(log_dir, "handwriting_ocr_service.log")
+    log_file = open(log_file_path, "w", encoding="utf-8")
+    env = os.environ.copy()
+    process = subprocess.Popen(
+        [python_executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8087", "--workers", "1"],
+        cwd=ocr_directory,
+        env=env,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    time.sleep(SERVICE_STARTUP_WAIT_SECONDS)
+    print(f"  日志文件: {log_file_path}")
+    return name, process
+
 def main():
     services = [
-        ("Knowledge Graph Service", "kg_service/main.py", 8007),
         ("Analysis Service", "backend/services/analysis_service.py", 8081),
         ("Error Analysis Agent", "backend/services/error_analysis_agent.py", 8082),
         ("Knowledge Service", "backend/services/knowledge_service.py", 8083),
@@ -41,6 +64,13 @@ def main():
     try:
         print("Initializing database...")
         subprocess.run([sys.executable, "backend/database/init_db.py"], check=True)
+
+        if os.path.exists("kg_service/main.py"):
+            services.insert(0, ("Knowledge Graph Service", "kg_service/main.py", 8007))
+        else:
+            print("Knowledge Graph Service 未找到，跳过启动。")
+
+        processes.append(start_ocr_service())
         
         for name, script, port in services:
             process = start_service(name, script, port)
