@@ -1,16 +1,18 @@
 import json
+import os
 import re
+import sys
 from datetime import datetime
 from typing import List, Optional, Tuple, Dict
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import sqlite3
-import requests
-from backend.config import DATABASE_PATH, KNOWLEDGE_GRAPH_URL
+from backend.config import DATABASE_PATH
 from id_utils import generate_id
 from llm_client import call_llm, call_llm_json, get_default_system_prompt, llm_enabled
-
-KG_SERVICE_URL = KNOWLEDGE_GRAPH_URL
 
 _knowledge_cache = None
 
@@ -119,24 +121,16 @@ def fetch_candidate_knowledge() -> List[Dict]:
     global _knowledge_cache
     if _knowledge_cache is not None:
         return _knowledge_cache
-    
-    all_knowledge = []
-    page = 1
+
     try:
-        while True:
-            response = requests.get(f"{KG_SERVICE_URL}/api/knowledge_points?page={page}&page_size=100", timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            items = data.get("data", [])
-            if not items:
-                break
-            all_knowledge.extend(items)
-            if len(items) < 100:
-                break
-            page += 1
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT knowledge_id AS id, knowledge_scope AS title FROM knowledge")
+            rows = cursor.fetchall()
+            all_knowledge = [dict(row) for row in rows]
         _knowledge_cache = all_knowledge
         return all_knowledge
-    except requests.exceptions.RequestException:
+    except Exception:
         return []
 
 def analyze_error_with_llm(request: ErrorAnalysisRequest) -> Tuple[List[ErrorTag], Dict, str, float]:
@@ -280,7 +274,10 @@ def analyze_error(request: ErrorAnalysisRequest):
     reasoning_content = ""
     
     try:
-        error_tags, knowledge_info, reasoning_content, total_confidence = analyze_error_with_llm(request)
+        if llm_enabled():
+            error_tags, knowledge_info, reasoning_content, total_confidence = analyze_error_with_llm(request)
+        else:
+            raise RuntimeError("LLM 未配置，跳过 LLM 错因分析")
     except Exception:
         error_tags = match_error_tags(request)
         knowledge_info = map_knowledge(request, error_tags)

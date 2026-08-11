@@ -25,28 +25,30 @@ def start_service(name, script_path, port, log_dir="backend/logs"):
     return process
 
 
-def start_ocr_service(log_dir="backend/logs"):
-    """Start the independent OCR module in its own working directory."""
-    name = "Handwriting OCR Service"
-    ocr_directory = os.path.abspath("handwriting_ocr_service")
-    venv_python = os.path.join(ocr_directory, ".venv-vl", "Scripts", "python.exe")
-    python_executable = venv_python if os.path.exists(venv_python) else sys.executable
-    print(f"Starting {name} on port 8087...")
-    os.makedirs(log_dir, exist_ok=True)
-    log_file_path = os.path.join(log_dir, "handwriting_ocr_service.log")
-    log_file = open(log_file_path, "w", encoding="utf-8")
-    env = os.environ.copy()
+def start_ocr_service(processes):
+    """OCR 服务需要独立的 Python 3.12 + PaddlePaddle 环境（handwriting_ocr_service/.venv-vl）。"""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ocr_dir = os.path.join(repo_root, "handwriting_ocr_service")
+    ocr_python = os.path.join(ocr_dir, ".venv-vl", "Scripts", "python.exe")
+    if not os.path.exists(ocr_python):
+        print("未检测到 handwriting_ocr_service/.venv-vl，跳过 OCR 服务（主流程将回退到模拟 OCR / 文本输入）")
+        return
+
+    os.makedirs("backend/logs", exist_ok=True)
+    log_file = open("backend/logs/OCR_Service.log", "w", encoding="utf-8")
+    print("Starting Handwriting OCR Service on port 8087...")
     process = subprocess.Popen(
-        [python_executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8087", "--workers", "1"],
-        cwd=ocr_directory,
-        env=env,
+        [ocr_python, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8087"],
+        cwd=ocr_dir,
+        env=os.environ.copy(),
         stdout=log_file,
         stderr=subprocess.STDOUT,
         text=True,
     )
     time.sleep(SERVICE_STARTUP_WAIT_SECONDS)
-    print(f"  日志文件: {log_file_path}")
-    return name, process
+    print("  OCR 日志文件: backend/logs/OCR_Service.log（首次启动需下载约 1.9GB 模型，耗时数分钟）")
+    processes.append(("OCR Service", process))
+
 
 def main():
     services = [
@@ -56,6 +58,7 @@ def main():
         ("Teaching Service", "backend/services/teaching_service.py", 8084),
         ("State Service", "backend/services/state_service.py", 8085),
         ("Review Scheduler", "backend/services/review_scheduler.py", 8086),
+        ("Insight Service", "backend/insight_service.py", 8010),
         ("API Gateway", "backend/api_gateway.py", 8000)
     ]
     
@@ -65,13 +68,8 @@ def main():
         print("Initializing database...")
         subprocess.run([sys.executable, "backend/database/init_db.py"], check=True)
 
-        if os.path.exists("kg_service/main.py"):
-            services.insert(0, ("Knowledge Graph Service", "kg_service/main.py", 8007))
-        else:
-            print("Knowledge Graph Service 未找到，跳过启动。")
+        start_ocr_service(processes)
 
-        processes.append(start_ocr_service())
-        
         for name, script, port in services:
             process = start_service(name, script, port)
             processes.append((name, process))

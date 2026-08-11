@@ -1,6 +1,10 @@
 import json
+import os
+import sys
 from datetime import datetime, timedelta
 from typing import Optional
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -178,7 +182,7 @@ def complete_review_task(push_record_id: str, is_correct: bool):
                 knowledge_point_id=row["knowledge_id"],
                 evidence=evidence,
             )
-            master_level = result["mastery"]
+            master_level = round(result["mastery"] / 100, 4)
             mastery_status = result["mastery_status"]
         else:
             master_level, mastery_status = calculate_mastery(correct_count, wrong_count)

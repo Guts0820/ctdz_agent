@@ -15,15 +15,6 @@ class EngineResult:
 
 
 @dataclass(frozen=True)
-class FormulaResult:
-    """LaTeX formulas detected by the optional mathematics recognition engine."""
-
-    formulas: tuple[str, ...]
-    confidence: float
-    engine: str
-
-
-@dataclass(frozen=True)
 class RecognitionResult:
     """The stable result returned by the recognition service."""
 
@@ -32,8 +23,6 @@ class RecognitionResult:
     engine: str
     fallback_used: bool
     status: str
-    formula_engine: str | None = None
-    formula_confidence: float | None = None
     blocks: tuple[dict[str, object], ...] = ()
     raw_json: dict[str, object] | None = None
     questions: tuple[dict[str, object], ...] = ()
@@ -45,8 +34,6 @@ class RecognitionResult:
             "engine": self.engine,
             "fallback_used": self.fallback_used,
             "status": self.status,
-            "formula_engine": self.formula_engine,
-            "formula_confidence": self.formula_confidence,
             "blocks": list(self.blocks),
             "raw_json": self.raw_json,
             "questions": list(self.questions),

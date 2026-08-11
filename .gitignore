@@ -1,13 +1,12 @@
-.env
-.env.*
-!.env.example
-outputs/
-**/__pycache__/
+__pycache__/
 *.pyc
 *.db
 .idea/
 *.log
 logs/
 .venv/
+.env
+.vscode/
+outputs/
 **/.venv/
 **/node_modules/

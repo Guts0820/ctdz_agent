@@ -10,7 +10,6 @@ def _as_bool(value: str | None, default: bool = False) -> bool:
 
 @dataclass(frozen=True)
 class Settings:
-    ocr_engine: str
     paddleocr_vl_device: str
     paddleocr_vl_pipeline_version: str
     confidence_threshold: float
@@ -21,17 +20,9 @@ class Settings:
     qwen_model: str | None
     qwen_timeout_seconds: float
     qwen_fallback_confidence: float
-    pix2text_enabled: bool
-    pix2text_device: str
 
     @classmethod
     def from_env(cls) -> "Settings":
-        ocr_engine = os.getenv("OCR_ENGINE", "paddleocr_vl").strip().lower()
-        if ocr_engine not in {"paddleocr_vl", "paddleocr_legacy"}:
-            raise ValueError(
-                "OCR_ENGINE must be 'paddleocr_vl' or 'paddleocr_legacy'."
-            )
-
         pipeline_version = os.getenv(
             "PADDLEOCR_VL_PIPELINE_VERSION", "v1.6"
         ).strip()
@@ -41,8 +32,7 @@ class Settings:
             )
 
         return cls(
-            ocr_engine=ocr_engine,
-            paddleocr_vl_device=os.getenv("PADDLEOCR_VL_DEVICE", "cpu").strip().lower(),
+            paddleocr_vl_device=os.getenv("PADDLEOCR_VL_DEVICE", "gpu").strip().lower(),
             paddleocr_vl_pipeline_version=pipeline_version,
             confidence_threshold=float(os.getenv("OCR_CONFIDENCE_THRESHOLD", "0.80")),
             max_image_bytes=int(os.getenv("MAX_IMAGE_BYTES", str(10 * 1024 * 1024))),
@@ -52,8 +42,6 @@ class Settings:
             qwen_model=os.getenv("QWEN_MODEL"),
             qwen_timeout_seconds=float(os.getenv("QWEN_TIMEOUT_SECONDS", "30")),
             qwen_fallback_confidence=float(os.getenv("QWEN_FALLBACK_CONFIDENCE", "0.85")),
-            pix2text_enabled=_as_bool(os.getenv("PIX2TEXT_ENABLED"), default=False),
-            pix2text_device=os.getenv("PIX2TEXT_DEVICE", "cpu"),
         )
 
     @property

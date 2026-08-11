@@ -1,2 +1,0 @@
--r requirements.txt
-pix2text>=1.1

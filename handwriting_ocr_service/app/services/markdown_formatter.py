@@ -6,16 +6,11 @@ def format_markdown(
     confidence: float,
     engine: str,
     status: str,
-    formulas: tuple[str, ...] = (),
     content_format: str = "plain_text",
     blocks: tuple[dict[str, object], ...] = (),
 ) -> str:
     """Return a predictable Markdown document from normalized recognition text."""
     normalized_text = text.strip() or "（未识别到文本）"
-    formula_section = ""
-    if formulas:
-        rendered_formulas = "\n\n".join(_as_markdown_formula(formula) for formula in formulas)
-        formula_section = f"## 数学公式（Pix2Text）\n\n{rendered_formulas}\n\n"
 
     block_section = _format_block_section(blocks)
     metadata = (
@@ -32,7 +27,6 @@ def format_markdown(
         f"{block_section}"
         "## 识别文本\n\n"
         f"{normalized_text}\n\n"
-        f"{formula_section}"
         f"{metadata}"
     )
 
@@ -53,10 +47,3 @@ def _format_block_section(blocks: tuple[dict[str, object], ...]) -> str:
             lines.append(content)
         lines.append("")
     return "\n".join(lines) + "\n"
-
-
-def _as_markdown_formula(formula: str) -> str:
-    normalized_formula = formula.strip()
-    if normalized_formula.startswith("$") and normalized_formula.endswith("$"):
-        return normalized_formula
-    return f"$${normalized_formula}$$"

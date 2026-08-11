@@ -4,21 +4,26 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 try:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Request
     from fastapi.middleware.cors import CORSMiddleware
+    from starlette.responses import JSONResponse
 except ImportError:
     print("错误：无法导入 fastapi。请运行 'pip install fastapi' 安装依赖。", file=sys.stderr)
     sys.exit(1)
 from pydantic import BaseModel
 import requests
 import sqlite3
+import httpx
 sys.path.insert(0, 'backend/services')
 from backend.config import (
     DEFAULT_GRADE,
     DEFAULT_TEXTBOOK_VERSION,
     DATABASE_PATH,
     service_urls,
+    INSIGHT_SERVICE_URL,
     HTTP_TIMEOUT_SECONDS,
+    OCR_TIMEOUT_SECONDS,
+    SERVICE_HEALTH_TIMEOUT_SECONDS,
 )
 from backend.services.cache_utils import cache_get, cache_set
 from backend.services.observability import log_event, timed
@@ -26,10 +31,11 @@ from llm_client import call_llm_json, get_default_system_prompt, llm_enabled
 from id_utils import generate_id
 
 app = FastAPI(title="AI Math Error Correction System API Gateway", version="1.0.0")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
-    allow_credentials=False,
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -210,7 +216,7 @@ def submit_homework(request: SubmitRequest):
         error_analysis_result = call_error_analysis_service(analysis_result)
         
         if not knowledge_id:
-            knowledge_id = error_analysis_result.get("knowledge_id", "G-N-1-001")
+            knowledge_id = error_analysis_result.get("knowledge_id", "K252")
         
         knowledge_result = call_knowledge_service({"knowledge_id": knowledge_id, "knowledge_scope": error_analysis_result.get("knowledge_scope", "")})
         
@@ -275,6 +281,14 @@ def submit_homework(request: SubmitRequest):
     
     except HTTPException:
         raise
+    except requests.HTTPError as e:
+        status = e.response.status_code if e.response is not None else 500
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail=f"上游服务错误({status}): {e.response.text[:300] if e.response is not None else e}",
+            )
+        raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:
         log_event("submit.error", request_id=request_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -289,16 +303,16 @@ def call_analysis_service(request: SubmitRequest) -> dict:
         "student_write": request.student_write,
         "text_status": "normal"
     }
+    # 分析服务内部可能执行真实 OCR（推理约 25 秒/张，首次加载模型更久），
+    # 使用 OCR 级别的超时预算，避免图片识别期间被网关判超时。
     try:
-        response = requests.post(url, json=payload, timeout=HTTP_TIMEOUT_SECONDS)
+        response = requests.post(url, json=payload, timeout=OCR_TIMEOUT_SECONDS)
         response.raise_for_status()
         return response.json()
     except requests.HTTPError as error:
         response = error.response
-        status_code = response.status_code if response is not None else 502
-        if 400 <= status_code < 600:
-            raise HTTPException(status_code=status_code, detail="Analysis service rejected the request.") from error
-        raise HTTPException(status_code=502, detail="Analysis service returned an invalid response.") from error
+        status = response.status_code if response is not None else 502
+        raise HTTPException(status_code=status, detail="Analysis service rejected the request.") from error
     except requests.RequestException as error:
         raise HTTPException(status_code=503, detail="Analysis service is unavailable.") from error
 
@@ -400,6 +414,39 @@ def get_student_mastery(student_id: str):
     response = requests.get(url, timeout=HTTP_TIMEOUT_SECONDS)
     response.raise_for_status()
     return response.json()
+
+@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def insight_proxy(path: str, request: Request):
+    """统一 API 入口：网关本地未处理的 /api/* 请求转发到 Insight 服务（8010）。
+
+    网关已注册的 /api/v1/submit、/api/v1/student/{id}/mastery 会优先匹配本地路由，
+    其余（登录/注册/错题本/报告/复习等）统一经此转发，前端只需访问 8000 一个端口。
+    """
+    url = f"{INSIGHT_SERVICE_URL.rstrip('/')}/api/{path}"
+    body = await request.body()
+    headers = {}
+    if body:
+        headers["Content-Type"] = request.headers.get("content-type", "application/json")
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as client:
+            resp = await client.request(
+                request.method,
+                url,
+                params=dict(request.query_params),
+                content=body or None,
+                headers=headers,
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Insight 服务不可用: {exc}")
+
+    content = None
+    if resp.content:
+        try:
+            content = resp.json()
+        except Exception:
+            content = resp.text
+    return JSONResponse(status_code=resp.status_code, content=content)
+
 
 @app.get("/health")
 def health_check():

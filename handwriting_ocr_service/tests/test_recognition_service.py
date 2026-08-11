@@ -1,4 +1,4 @@
-from app.models import EngineResult, FormulaResult
+from app.models import EngineResult
 from app.services.recognition_service import RecognitionService
 
 
@@ -8,16 +8,6 @@ class FakeEngine:
         self.calls = 0
 
     def recognize(self, image_bytes: bytes, content_type: str) -> EngineResult:
-        self.calls += 1
-        return self.result
-
-
-class FakeFormulaEngine:
-    def __init__(self, result: FormulaResult) -> None:
-        self.result = result
-        self.calls = 0
-
-    def recognize_formulas(self, image_bytes: bytes, content_type: str) -> FormulaResult:
         self.calls += 1
         return self.result
 
@@ -57,74 +47,6 @@ def test_keeps_low_confidence_result_when_no_fallback_is_configured() -> None:
     assert result.status == "low_confidence"
     assert result.fallback_used is False
     assert "无法确认" in result.markdown
-
-
-def test_adds_pix2text_latex_formula_without_replacing_paddle_handwriting_text() -> None:
-    primary = FakeEngine(EngineResult(text="计算下面的式子", confidence=0.95, engine="paddleocr"))
-    formula = FakeFormulaEngine(
-        FormulaResult(formulas=(r"\frac{1}{2} + \frac{1}{3}",), confidence=0.90, engine="pix2text")
-    )
-    service = RecognitionService(
-        primary_engine=primary,
-        fallback_engine=None,
-        confidence_threshold=0.8,
-        formula_engine=formula,
-    )
-
-    result = service.recognize(b"image", "image/png")
-
-    assert "计算下面的式子" in result.markdown
-    assert "## 数学公式（Pix2Text）" in result.markdown
-    assert r"$$\frac{1}{2} + \frac{1}{3}$$" in result.markdown
-    assert result.formula_engine == "pix2text"
-
-
-def test_keeps_primary_text_when_pix2text_formula_enhancement_fails() -> None:
-    class BrokenFormulaEngine:
-        def recognize_formulas(self, image_bytes: bytes, content_type: str) -> FormulaResult:
-            raise RuntimeError("formula model unavailable")
-
-    primary = FakeEngine(EngineResult(text="8 ÷ 2", confidence=0.94, engine="paddleocr"))
-    service = RecognitionService(
-        primary_engine=primary,
-        fallback_engine=None,
-        confidence_threshold=0.8,
-        formula_engine=BrokenFormulaEngine(),
-    )
-
-    result = service.recognize(b"image", "image/png")
-
-    assert "8 ÷ 2" in result.markdown
-    assert result.formula_engine is None
-
-
-def test_preserves_native_vl_markdown_without_pix2text_duplication() -> None:
-    primary = FakeEngine(
-        EngineResult(
-            text="# 解题过程\n\n$$\\frac{1}{2} + \\frac{1}{3}$$",
-            confidence=0.91,
-            engine="paddleocr-vl-1.6",
-            content_format="markdown",
-            review_required=False,
-        )
-    )
-    formula = FakeFormulaEngine(
-        FormulaResult(formulas=(r"\frac{1}{2} + \frac{1}{3}",), confidence=0.99, engine="pix2text")
-    )
-    service = RecognitionService(
-        primary_engine=primary,
-        fallback_engine=None,
-        confidence_threshold=0.8,
-        formula_engine=formula,
-    )
-
-    result = service.recognize(b"image", "image/png")
-
-    assert result.status == "success"
-    assert result.markdown.count(r"\frac{1}{2} + \frac{1}{3}") == 1
-    assert "## 识别文本" not in result.markdown
-    assert "引擎：paddleocr-vl-1.6" in result.markdown
-    assert formula.calls == 0
 
 
 def test_uses_fallback_when_vl_quality_check_requires_review() -> None:

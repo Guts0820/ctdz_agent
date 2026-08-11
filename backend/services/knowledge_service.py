@@ -2,17 +2,15 @@ import sqlite3
 from typing import Optional
 from datetime import datetime
 
-import requests
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from backend.config import DATABASE_PATH, DEFAULT_TEXTBOOK_VERSION, KNOWLEDGE_GRAPH_URL, HTTP_TIMEOUT_SECONDS
+from backend.config import DATABASE_PATH, DEFAULT_TEXTBOOK_VERSION
 from backend.services.cache_utils import cache_get, cache_set
 from backend.services.observability import log_event, timed
 
 app = FastAPI(title="Knowledge Service", version="1.0.0")
 
-KG_SERVICE_URL = KNOWLEDGE_GRAPH_URL
 DATABASE = DATABASE_PATH
 
 class KnowledgeRetrieveRequest(BaseModel):
@@ -35,17 +33,74 @@ class KnowledgeRetrieveResponse(BaseModel):
     example: str
     teaching_tips: str
 
-def fetch_knowledge_from_graph(knowledge_id: str) -> dict:
+def fetch_knowledge_from_sqlite(knowledge_id: str, knowledge_scope: str | None = None) -> dict:
     cache_key = f"knowledge:{knowledge_id}"
     cached = cache_get(cache_key)
     if cached:
         return cached
 
-    response = requests.get(f"{KG_SERVICE_URL}/api/knowledge_points/{knowledge_id}", timeout=HTTP_TIMEOUT_SECONDS)
-    if response.status_code == 404:
-        return None
-    response.raise_for_status()
-    payload = response.json()
+    import sqlite3
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT knowledge_id, knowledge_scope, knowledge_name, grade,
+                   textbook_version, unit, prerequisite, next_knowledge,
+                   difficulty, is_core
+            FROM knowledge
+            WHERE knowledge_id = ?
+            """,
+            (knowledge_id,),
+        ).fetchone()
+        if row is None and knowledge_scope:
+            # 兼容两套知识点编号（G-N-* 与 K-*）：按名称模糊匹配一次
+            row = conn.execute(
+                """
+                SELECT knowledge_id, knowledge_scope, knowledge_name, grade,
+                       textbook_version, unit, prerequisite, next_knowledge,
+                       difficulty, is_core
+                FROM knowledge
+                WHERE knowledge_scope LIKE ?
+                ORDER BY length(knowledge_scope) ASC
+                LIMIT 1
+                """,
+                (f"%{knowledge_scope}%",),
+            ).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        # 找不到时不再中断整条链路：返回最小兜底数据，教学内容仍由错因分析的知识点名称驱动
+        return {
+            "id": knowledge_id,
+            "title": knowledge_scope or knowledge_id,
+            "content": knowledge_scope or "",
+            "difficulty": "medium",
+            "grade": "",
+            "unit": "",
+            "prerequisite": "",
+            "next_knowledge": "",
+            "textbook_version": "",
+            "common_mistakes": "",
+            "example": "",
+            "teaching_points": "",
+        }
+
+    payload = {
+        "id": row["knowledge_id"],
+        "title": row["knowledge_scope"] or row["knowledge_name"],
+        "content": row["knowledge_scope"] or "",
+        "difficulty": row["difficulty"] or "medium",
+        "grade": row["grade"] or "",
+        "unit": row["unit"] or "",
+        "prerequisite": row["prerequisite"] or "",
+        "next_knowledge": row["next_knowledge"] or "",
+        "textbook_version": row["textbook_version"] or "",
+        "common_mistakes": "",
+        "example": "",
+        "teaching_points": "",
+    }
     cache_set(cache_key, payload)
     return payload
 
@@ -54,15 +109,9 @@ def fetch_knowledge_from_graph(knowledge_id: str) -> dict:
 def retrieve_knowledge(request: KnowledgeRetrieveRequest):
     log_event("knowledge.request", knowledge_id=request.knowledge_id, grade=request.grade)
     try:
-        knowledge = fetch_knowledge_from_graph(request.knowledge_id)
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=503, detail=f"知识图谱服务不可用: {str(e)}")
-    
-    if not knowledge:
-        raise HTTPException(
-            status_code=404,
-            detail=f"知识点 {request.knowledge_id} 不存在"
-        )
+        knowledge = fetch_knowledge_from_sqlite(request.knowledge_id, request.knowledge_scope)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"知识点检索失败: {str(e)}")
     
     scope_validation = validate_scope(request, knowledge)
     
@@ -77,10 +126,10 @@ def retrieve_knowledge(request: KnowledgeRetrieveRequest):
         difficulty=knowledge.get("difficulty", "medium"),
         standard_solution="",
         scope_validation=scope_validation,
-        prerequisite="",
-        next_knowledge="",
-        textbook_version=request.textbook_version or DEFAULT_TEXTBOOK_VERSION,
-        unit="",
+        prerequisite=knowledge.get("prerequisite", ""),
+        next_knowledge=knowledge.get("next_knowledge", ""),
+        textbook_version=knowledge.get("textbook_version") or request.textbook_version or DEFAULT_TEXTBOOK_VERSION,
+        unit=knowledge.get("unit", ""),
         common_errors=knowledge.get("common_mistakes", ""),
         forbidden_explanation="",
         example=knowledge.get("example", ""),
