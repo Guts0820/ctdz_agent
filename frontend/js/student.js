@@ -4,9 +4,10 @@ const StudentPage = {
 
     async loadMistakes() {
         const user = MockData.currentUser || {};
-        if (!user.userId) return;
+        const sid = user.userId || user.id || 'S-0001';
         try {
-            this.realData.mistakes = await Api.getWrongQuestions(user.userId);
+            const result = await Api.getStudentWrongAnswers(sid);
+            this.realData.mistakes = result.data || [];
         } catch (e) {
             this.realData.mistakes = []; // 接口不可用时用 MockData 兜底渲染
         }
@@ -67,23 +68,57 @@ const StudentPage = {
             </div>
             <div class="mt-4 grid grid-cols-4 gap-2 text-center text-sm">
                 <div class="bg-white/20 rounded-lg p-2">
-                    <div class="font-bold text-lg">${MockData.studentStats.totalQuestions}</div>
+                    <div class="font-bold text-lg" id="stat-total">-</div>
                     <div class="text-xs opacity-80">总题数</div>
                 </div>
                 <div class="bg-white/20 rounded-lg p-2">
-                    <div class="font-bold text-lg">${MockData.studentStats.correctRate}%</div>
+                    <div class="font-bold text-lg" id="stat-rate">-</div>
                     <div class="text-xs opacity-80">正确率</div>
                 </div>
                 <div class="bg-white/20 rounded-lg p-2">
-                    <div class="font-bold text-lg">${MockData.studentStats.totalMistakes}</div>
+                    <div class="font-bold text-lg" id="stat-wrong">-</div>
                     <div class="text-xs opacity-80">错题数</div>
                 </div>
                 <div class="bg-white/20 rounded-lg p-2">
-                    <div class="font-bold text-lg">${MockData.studentStats.reviewedMistakes}</div>
+                    <div class="font-bold text-lg" id="stat-reviewed">-</div>
                     <div class="text-xs opacity-80">已订正</div>
                 </div>
             </div>
         </div>`;
+    },
+
+    _homeStats: null,
+
+    _loadHomeStats() {
+        const user = MockData.currentUser || {};
+        const sid = user.userId || user.id || 'S-0001';
+        if (this._homeStats) {
+            setTimeout(() => this._updateStatsDisplay(), 100);
+            return;
+        }
+        Api.getStudentStats(sid)
+            .then((stats) => {
+                this._homeStats = stats;
+                setTimeout(() => this._updateStatsDisplay(), 100);
+            })
+            .catch(() => {
+                this._homeStats = { total_questions: 0, correct_rate: 0, total_mistakes: 0, reviewed_mistakes: 0 };
+                setTimeout(() => this._updateStatsDisplay(), 100);
+            });
+    },
+
+    _updateStatsDisplay() {
+        const s = this._homeStats || {};
+        const set = (id, text) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+        };
+        set('stat-total', s.total_questions || 0);
+        set('stat-rate', (s.correct_rate || 0) + '%');
+        set('stat-wrong', s.total_mistakes || 0);
+        set('stat-reviewed', s.reviewed_mistakes || 0);
+        const homeCard = document.getElementById('stat-wrong-home');
+        if (homeCard) homeCard.textContent = (s.total_mistakes || 0) + ' 道错题待复习';
     },
 
     toggleUserMenu() {
@@ -199,6 +234,7 @@ const StudentPage = {
         }
 
         content.innerHTML = renderMap[page]();
+        if (page === 'home') this._loadHomeStats();
         if (page === 'report') this.initReportCharts();
         if (page === 'path') this.initPathCharts();
     },
@@ -222,7 +258,7 @@ const StudentPage = {
                 <div onclick="StudentPage.navigate('mistakes')" class="card-hover bg-white rounded-2xl p-4 cursor-pointer shadow-soft border border-gray-100">
                     <div class="text-3xl mb-2">📝</div>
                     <div class="font-bold">错题本</div>
-                    <div class="text-sm text-gray-500">${MockData.studentStats.totalMistakes}道错题待复习</div>
+                    <div class="text-sm text-gray-500" id="stat-wrong-home">- 道错题待复习</div>
                 </div>
                 <div onclick="StudentPage.navigate('path')" class="card-hover bg-white rounded-2xl p-4 cursor-pointer shadow-soft border border-gray-100">
                     <div class="text-3xl mb-2">🛤️</div>
@@ -886,12 +922,13 @@ const StudentPage = {
         const mistakes = (realList && realList.length !== undefined)
             ? realList.map(m => ({
                 status: m.reviewed ? '已订正' : '未订正',
-                question_text: '题目 ' + (m.question_id || m.id || ''),
-                student_answer: m.wrong_answer || '—',
+                question_text: m.question_text || ('题目 ' + (m.question_id || m.id || '')),
+                student_answer: m.student_answer || '—',
                 correct_answer: '—',
-                error_type: m.error_cause_id || '未分类',
-                error_name: m.error_cause_id || '待分析',
-                date: (m.last_wrong_time || '').slice(0, 10)
+                error_type: m.error_type || '未分类',
+                error_name: m.error_type || '待分析',
+                date: (m.date || '').slice(0, 10),
+                wrong_count: m.wrong_count || 1
             }))
             : MockData.mistakes;
         const uncorrected = mistakes.filter(m => m.status === '未订正');

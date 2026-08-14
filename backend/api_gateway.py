@@ -621,6 +621,105 @@ def list_questions(
     return {"status": "success", "data": questions, "total": total, "page": page, "page_size": page_size}
 
 
+@app.get("/api/student/{student_id}/stats")
+def get_student_stats(student_id: str):
+    """学生首页统计数据（来自 answer_history，SQLite 聚合）"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) as total FROM answer_history WHERE student_id = ?",
+            (student_id,),
+        )
+        total = cursor.fetchone()["total"]
+        cursor.execute(
+            "SELECT COUNT(*) as correct FROM answer_history WHERE student_id = ? AND is_correct = 1",
+            (student_id,),
+        )
+        correct = cursor.fetchone()["correct"]
+        cursor.execute(
+            "SELECT COUNT(*) as wrong FROM answer_history WHERE student_id = ? AND is_correct = 0",
+            (student_id,),
+        )
+        wrong = cursor.fetchone()["wrong"]
+        cursor.execute(
+            """SELECT COUNT(DISTINCT rp.review_plan_id) as reviewed
+               FROM review_plan rp
+               JOIN knowledge_mastery km ON rp.knowledge_mastery_id = km.knowledge_mastery_id
+               WHERE km.student_id = ?""",
+            (student_id,),
+        )
+        reviewed = cursor.fetchone()["reviewed"]
+        return {
+            "total_questions": total,
+            "correct_rate": round(correct / total * 100) if total > 0 else 0,
+            "total_mistakes": wrong,
+            "reviewed_mistakes": reviewed,
+        }
+
+
+@app.get("/api/student/{student_id}/wrong-answers")
+def get_wrong_answers(student_id: str):
+    """从 answer_history 读取学生错题记录"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT ah.answer_history_id, ah.question_id, ah.student_ocr_answer,
+                      ah.judge_result, ah.core_error_type, ah.submitted_at,
+                      q.question_description
+               FROM answer_history ah
+               LEFT JOIN question q ON ah.question_id = q.question_id
+               WHERE ah.student_id = ? AND ah.is_correct = 0
+               ORDER BY ah.submitted_at DESC""",
+            (student_id,),
+        )
+        rows = cursor.fetchall()
+        return {
+            "student_id": student_id,
+            "total": len(rows),
+            "data": [
+                {
+                    "id": r["answer_history_id"],
+                    "question_id": r["question_id"],
+                    "question_text": r["question_description"] or r["question_id"] or "",
+                    "student_answer": r["student_ocr_answer"] or "",
+                    "error_type": r["core_error_type"] or "未知",
+                    "date": r["submitted_at"] or "",
+                    "reviewed": False,
+                    "wrong_count": 1,
+                }
+                for r in rows
+            ],
+        }
+
+
+@app.get("/api/class/{class_name}/mistake-stats")
+def get_class_mistake_stats(class_name: str):
+    """按知识点聚合高频错题，取 top 5"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT qkm.knowledge_id, COUNT(*) as error_count,
+                      GROUP_CONCAT(DISTINCT ah.core_error_type) as error_types
+               FROM answer_history ah
+               JOIN question_knowledge_mapping qkm ON ah.question_id = qkm.question_id
+               WHERE ah.is_correct = 0
+               GROUP BY qkm.knowledge_id
+               ORDER BY error_count DESC LIMIT 5"""
+        )
+        rows = cursor.fetchall()
+        return {
+            "class_name": class_name,
+            "data": [
+                {
+                    "knowledge_id": r["knowledge_id"],
+                    "error_count": r["error_count"],
+                    "error_types": (r["error_types"] or "").split(","),
+                }
+                for r in rows
+            ],
+        }
+
+
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 async def insight_proxy(path: str, request: Request):
     """统一 API 入口：网关本地未处理的 /api/* 请求转发到 Insight 服务（8010）。

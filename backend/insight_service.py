@@ -14,6 +14,8 @@ from backend.user_database import user_db
 from insight.routers.users import router as users_router
 from insight.routers.growth_report import router as growth_report_router
 from insight.routers.datahub import router as datahub_router
+from insight.routers.students import router as students_router
+from insight.routers.knowledge_points import router as knowledge_points_router
 from review.api.priority import router as review_priority_router
 from review.api.review_plans import router as review_plans_router
 from review.api.review_sessions import router as review_sessions_router
@@ -53,6 +55,8 @@ def health_check():
 app.include_router(users_router)
 app.include_router(growth_report_router)
 app.include_router(datahub_router)
+app.include_router(students_router)
+app.include_router(knowledge_points_router)
 app.include_router(review_priority_router, prefix="/api/v1")
 app.include_router(review_plans_router, prefix="/api/v1")
 app.include_router(review_sessions_router, prefix="/api/v1")

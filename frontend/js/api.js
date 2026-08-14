@@ -308,5 +308,14 @@ const Api = {
     // 获取题目列表（用于批次选题）
     async getQuestionsForBatch(grade, knowledgeId, page, pageSize) {
         return this.fetch('/questions?grade=' + (grade || '') + '&knowledge_id=' + (knowledgeId || '') + '&page=' + (page || 1) + '&page_size=' + (pageSize || 50));
+    },
+
+    // 学生首页统计与错题本（真实数据，SQLite 聚合）
+    async getStudentStats(studentId) {
+        return this.fetch('/student/' + studentId + '/stats');
+    },
+
+    async getStudentWrongAnswers(studentId) {
+        return this.fetch('/student/' + studentId + '/wrong-answers');
     }
 };
