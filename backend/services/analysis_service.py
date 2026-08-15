@@ -87,9 +87,25 @@ def process_analysis(request: AnalysisRequest):
         ocr_result = simulate_ocr(request)
     
     if ocr_result["text_status"] != "normal":
-        raise HTTPException(
-            status_code=400,
-            detail=f"OCR failed: {ocr_result['text_status']}"
+        status_text = ocr_result["text_status"]
+        log_event("analysis.ocr_not_ok", text_status=status_text)
+        return AnalysisResponse(
+            judge_result="unknown",
+            step_feedback="未能识别出题目或作答内容，请重新拍摄清晰照片后重试。",
+            error_step_list=[],
+            miss_step_list=[],
+            is_copy=False,
+            core_error_type="",
+            confidence=0.0,
+            original_question=ocr_result.get("original_question", ""),
+            student_write=ocr_result.get("student_write", ""),
+            text_status=status_text,
+            student_id=request.student_id,
+            question_id=request.question_id,
+            ocr_markdown=ocr_result.get("ocr_markdown"),
+            ocr_engine=ocr_result.get("engine"),
+            ocr_fallback_used=ocr_result.get("fallback_used"),
+            ocr_status=status_text,
         )
     
     parse_result = simulate_parse(ocr_result)

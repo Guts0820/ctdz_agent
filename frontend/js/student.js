@@ -4,7 +4,7 @@ const StudentPage = {
 
     async loadMistakes() {
         const user = MockData.currentUser || {};
-        const sid = user.userId || user.id || 'S-0001';
+        const sid = user.studentId || 'S-0001';
         try {
             const result = await Api.getStudentWrongAnswers(sid);
             this.realData.mistakes = result.data || [];
@@ -15,7 +15,7 @@ const StudentPage = {
 
     async loadReport() {
         const user = MockData.currentUser || {};
-        const sid = user.userId || user.id || 'S-0001';
+        const sid = user.studentId || 'S-0001';
         try {
             this.realData.report = await Api.getGrowthReport(sid);
         } catch (e) {
@@ -25,7 +25,7 @@ const StudentPage = {
 
     async loadLearningPath() {
         const user = MockData.currentUser || {};
-        const sid = user.userId || user.id || 'S-0001';
+        const sid = user.studentId || 'S-0001';
         try {
             const result = await Api.getLearningPath(sid);
             this.realData.learningPath = (result && result.path) || [];
@@ -102,7 +102,7 @@ const StudentPage = {
 
     _loadHomeStats() {
         const user = MockData.currentUser || {};
-        const sid = user.userId || user.id || 'S-0001';
+        const sid = user.studentId || 'S-0001';
         if (this._homeStats) {
             setTimeout(() => this._updateStatsDisplay(), 100);
             return;
@@ -218,11 +218,11 @@ const StudentPage = {
         
         const content = document.getElementById('student-content');
         const renderMap = {
-            home: this.renderHome,
-            camera: this.renderCamera,
-            mistakes: this.renderMistakes,
-            path: this.renderPath,
-            report: this.renderReport
+            home: () => this.renderHome(),
+            camera: () => this.renderCamera(),
+            mistakes: () => this.renderMistakes(),
+            path: () => this.renderPath(),
+            report: () => this.renderReport()
         };
 
         if (page === 'mistakes' && this.realData.mistakes === null && !this._loading.mistakes) {
@@ -426,7 +426,8 @@ const StudentPage = {
                 content.innerHTML = '<div class="p-10 text-center text-gray-400">🔍 正在识别与批改，请稍候...</div>';
                 try {
                     const user = MockData.currentUser || {};
-                    const resp = await Api.submitHomework(user.id || 'S-0001', reader.result);
+                    const compressed = await StudentPage.compressImage(reader.result);
+                    const resp = await Api.submitHomework(user.studentId || 'S-0001', compressed);
                     this.showSubmitResult(resp && resp.data ? resp.data : resp);
                 } catch (error) {
                     content.innerHTML = `
@@ -443,7 +444,43 @@ const StudentPage = {
         input.click();
     },
 
+    compressImage(dataUrl, maxSize = 1600, quality = 0.85) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    let { width, height } = img;
+                    const scale = Math.min(1, maxSize / Math.max(width, height));
+                    width = Math.round(width * scale);
+                    height = Math.round(height * scale);
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', quality));
+                } catch (e) {
+                    resolve(dataUrl);
+                }
+            };
+            img.onerror = () => resolve(dataUrl);
+            img.src = dataUrl;
+        });
+    },
+
     showSubmitResult(data) {
+        const ocrStatus = (data.ocr && data.ocr.status) || data.ocr_status;
+        if (data.judge_result === 'unknown' && ocrStatus && ocrStatus !== 'success') {
+            const content = document.getElementById('student-content');
+            content.innerHTML = `
+                <div class="bg-red-50 border border-red-200 rounded-2xl p-6 text-center">
+                    <div class="text-3xl mb-2">😵</div>
+                    <div class="font-bold text-red-700 mb-1">识别失败</div>
+                    <div class="text-xs text-red-500 mb-4">${data.step_feedback || '未能识别出题目或作答内容，请重拍后重试'}</div>
+                    <button onclick="StudentPage.navigate('camera')" class="bg-purple-600 text-white px-5 py-2 rounded-xl text-sm">返回重试</button>
+                </div>`;
+            return;
+        }
         const isCorrect = data.judge_result === 'correct';
         const tags = (data.error_tags || []).map(t => t.level3 || t.level2 || t.level1).filter(Boolean);
         const content = document.getElementById('student-content');

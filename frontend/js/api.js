@@ -13,7 +13,14 @@ const Api = {
             };
             const response = await fetch(url, withCredentials);
             if (!response.ok) {
-                throw new Error('API请求失败: ' + response.status);
+                let detail = 'API请求失败: ' + response.status;
+                try {
+                    const body = await response.json();
+                    if (body && body.detail) {
+                        detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+                    }
+                } catch (e) { /* 非 JSON 响应，保留默认信息 */ }
+                throw new Error(detail);
             }
             return await response.json();
         } catch (error) {

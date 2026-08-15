@@ -69,7 +69,7 @@ def get_class_students(class_name: str):
 def get_student(student_id: str):
     with _conn() as conn:
         row = conn.execute(
-            """SELECT student_id, student_name, student_class, student_grade
+            """SELECT student_id, student_name, student_class, student_grade, student_gender
                FROM students WHERE student_id = ?""",
             (student_id,),
         ).fetchone()

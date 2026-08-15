@@ -130,6 +130,19 @@ class UserDatabase:
         except sqlite3.IntegrityError:
             return None
 
+    def seed_demo_users(self):
+        """幂等写入演示账号，保证登录开箱即用（学生 S001-S008 / 教师 T001-T003 / 管理员 A001-A002）。"""
+        demo_users = [
+            ("S001", "123456", 1), ("S002", "123456", 1), ("S003", "123456", 1),
+            ("S004", "123456", 1), ("S005", "123456", 1), ("S006", "123456", 1),
+            ("S007", "123456", 1), ("S008", "123456", 1),
+            ("T001", "123456", None), ("T002", "123456", None), ("T003", "123456", None),
+            ("A001", "admin123", None), ("A002", "admin123", None),
+        ]
+        for username, password, grade in demo_users:
+            if not self.get_user(username):
+                self.insert_user(username, password, grade)
+
     def get_user(self, username):
         result = self.query("SELECT * FROM user WHERE username = ?", (username,))
         return dict(result[0]) if result else None

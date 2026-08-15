@@ -118,32 +118,58 @@ const LoginPage = {
             return;
         }
 
+        const profile = this.findAccount(accountId);
         try {
             const res = await Api.login(accountId, password);
-            this.onLoginSuccess(res, accountId, password);
+            await this.onLoginSuccess(res, accountId, password);
         } catch (error) {
             // Demo 便捷：账号不存在时自动注册后再登录；生产环境应提示用户注册。
             try {
-                await Api.register(accountId, password);
+                await Api.register(accountId, password, profile ? profile.grade : null, null);
                 const res = await Api.login(accountId, password);
-                this.onLoginSuccess(res, accountId, password);
+                await this.onLoginSuccess(res, accountId, password);
             } catch (registerError) {
                 this.showError('账号或密码错误');
             }
         }
     },
 
-    onLoginSuccess(res, username, password) {
+    findAccount(id) {
+        const catalog = this.selectedRole === 'student' ? MockData.users.students
+            : this.selectedRole === 'teacher' ? MockData.users.teachers
+            : MockData.users.admins;
+        return (catalog || []).find(a => String(a.id) === String(id)) || null;
+    },
+
+    async onLoginSuccess(res, username, password) {
         const user = (res && res.user) || {};
-        // 演示阶段：前端角色由登录页选择；studentId 固定映射到 example_db 的演示学生 S-0001，
-        // 真实产品中应由后端返回 user 与 student 的绑定关系。
-        MockData.currentUser = {
+        const account = this.findAccount(username) || {};
+        const isStudent = this.selectedRole === 'student';
+        // 演示阶段：学生账号统一绑定 example_db 的演示学生 S-0001（真实答题数据所在）
+        const demoStudentId = isStudent ? 'S-0001' : null;
+        const baseUser = {
             ...user,
-            id: this.selectedRole === 'student' ? 'S-0001' : user.id,
+            ...account,
+            id: demoStudentId || account.id || user.id,
             userId: user.id,
+            studentId: demoStudentId,
             username: username,
-            role: this.selectedRole
+            role: this.selectedRole,
+            grade: account.grade != null ? account.grade : user.grade,
+            class: account.class || '',
         };
+        if (isStudent) {
+            try {
+                const p = await Api.getStudent('S-0001');
+                if (p && p.student_name) {
+                    baseUser.name = p.student_name;
+                    baseUser.grade = p.student_grade || baseUser.grade;
+                    baseUser.class = p.student_class || baseUser.class;
+                    baseUser.avatar = p.student_gender === '女' ? '👧' : '👦';
+                }
+            } catch (e) { /* 后端未就绪时用账号资料兜底 */ }
+        }
+        MockData.currentUser = baseUser;
         if (this.selectedRole === 'teacher' && MockData.users.teachers[0]) {
             MockData.currentClass = MockData.users.teachers[0].classIds[0];
         }

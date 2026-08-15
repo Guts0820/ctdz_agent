@@ -196,6 +196,20 @@ def submit_homework(request: SubmitRequest):
                 "status": analysis_result.get("ocr_status"),
             }
         } if analysis_result.get("ocr_markdown") is not None else {}
+        # OCR 未识别出内容（无文本可判题）时，直接返回可操作的提示，不再走模板化判题链路
+        if analysis_result.get("judge_result") == "unknown" and not analysis_result.get("student_write"):
+            return SubmitResponse(
+                status="success",
+                data={
+                    **ocr_data,
+                    "judge_result": "unknown",
+                    "ocr_status": analysis_result.get("ocr_status", "ocr_unavailable"),
+                    "step_feedback": analysis_result.get(
+                        "step_feedback", "未能识别出题目或作答内容，请重新拍摄清晰照片后重试。"
+                    ),
+                    "next_action": "retry",
+                }
+            )
         standard_answer = lookup_question_standard_answer(request.question_id or analysis_result.get("question_id"), analysis_result.get("original_question"))
         if standard_answer and llm_enabled():
             question_json = {

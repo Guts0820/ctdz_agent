@@ -40,6 +40,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     user_db.connect()
+    user_db.seed_demo_users()
 
 
 @app.get("/")
