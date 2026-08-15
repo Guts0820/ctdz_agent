@@ -473,24 +473,30 @@ const StudentPage = {
         if (data.judge_result === 'unknown' && ocrStatus && ocrStatus !== 'success') {
             const content = document.getElementById('student-content');
             content.innerHTML = `
-                <div class="bg-red-50 border border-red-200 rounded-2xl p-6 text-center">
-                    <div class="text-3xl mb-2">😵</div>
-                    <div class="font-bold text-red-700 mb-1">识别失败</div>
-                    <div class="text-xs text-red-500 mb-4">${data.step_feedback || '未能识别出题目或作答内容，请重拍后重试'}</div>
-                    <button onclick="StudentPage.navigate('camera')" class="bg-purple-600 text-white px-5 py-2 rounded-xl text-sm">返回重试</button>
+                <div class="space-y-4">
+                    <div class="bg-red-50 border border-red-200 rounded-2xl p-6 text-center">
+                        <div class="text-3xl mb-2">😵</div>
+                        <div class="font-bold text-red-700 mb-1">识别失败</div>
+                        <div class="text-xs text-red-500 mb-4">${data.step_feedback || '未能识别出题目或作答内容，请重拍后重试'}</div>
+                        <button onclick="StudentPage.navigate('camera')" class="bg-purple-600 text-white px-5 py-2 rounded-xl text-sm">返回重试</button>
+                    </div>
+                    ${this.renderOcrCompare(data)}
                 </div>`;
             return;
         }
         const isCorrect = data.judge_result === 'correct';
+        const isUnknown = data.judge_result === 'unknown';
         const tags = (data.error_tags || []).map(t => t.level3 || t.level2 || t.level1).filter(Boolean);
         const content = document.getElementById('student-content');
         content.innerHTML = `
         <div class="space-y-4">
-            <div class="${isCorrect ? 'bg-gradient-to-r from-green-500 to-emerald-600' : 'bg-gradient-to-r from-red-500 to-orange-500'} text-white rounded-2xl p-5 shadow-soft">
+            <div class="${isCorrect ? 'bg-gradient-to-r from-green-500 to-emerald-600' : isUnknown ? 'bg-gradient-to-r from-amber-500 to-orange-500' : 'bg-gradient-to-r from-red-500 to-orange-500'} text-white rounded-2xl p-5 shadow-soft">
                 <div class="text-sm opacity-90">📋 批改结果</div>
-                <div class="text-2xl font-bold mt-1">${isCorrect ? '✓ 回答正确' : '✗ 回答错误'}</div>
+                <div class="text-2xl font-bold mt-1">${isCorrect ? '✓ 回答正确' : isUnknown ? '⚠️ 未识别到作答' : '✗ 回答错误'}</div>
                 <div class="text-xs opacity-80 mt-2">${data.step_feedback || ''}</div>
             </div>
+
+            ${this.renderOcrCompare(data)}
 
             ${data.core_error_type ? `
             <div class="bg-white rounded-2xl p-4 shadow-soft">
@@ -527,6 +533,49 @@ const StudentPage = {
                 再拍一题 →
             </button>
         </div>`;
+    },
+
+    renderOcrCompare(data) {
+        const question = data.original_question || '';
+        const answer = data.student_write || '';
+        const ocr = data.ocr || {};
+        const questions = ocr.questions || [];
+        const lines = (ocr.text_lines || [])
+            .map(t => (typeof t === 'string' ? t : (t && t.text) || ''))
+            .filter(Boolean);
+        if (!question && !answer && lines.length === 0 && questions.length === 0) return '';
+        return `
+            <div class="bg-white rounded-2xl p-4 shadow-soft border border-gray-100">
+                <div class="font-bold mb-2">🔎 识别对照</div>
+                <div class="space-y-2 text-sm">
+                    <div class="p-2 bg-gray-50 rounded-lg">
+                        <div class="text-xs text-gray-500 mb-1">识别到的题目</div>
+                        <div class="text-gray-800 whitespace-pre-line">${question || '（未识别到题目）'}</div>
+                    </div>
+                    <div class="p-2 bg-gray-50 rounded-lg">
+                        <div class="text-xs text-gray-500 mb-1">识别到的作答</div>
+                        <div class="text-gray-800 whitespace-pre-line">${answer || '（未识别到作答内容）'}</div>
+                    </div>
+                    ${questions.length > 1 ? `
+                    <div class="p-2 bg-gray-50 rounded-lg">
+                        <div class="text-xs text-gray-500 mb-1">题目清单（共 ${questions.length} 题）</div>
+                        <div class="space-y-1">
+                            ${questions.map(q => `
+                                <div class="text-xs text-gray-700">
+                                    ${q.id ? q.id + '. ' : ''}${q.stem || ''}${q.answer ? ' → 作答：' + q.answer : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>` : ''}
+                    ${lines.length > 0 ? `
+                    <div class="p-2 bg-gray-50 rounded-lg">
+                        <div class="text-xs text-gray-500 mb-1">OCR 识别文本行</div>
+                        <div class="flex flex-wrap gap-1">
+                            ${lines.map(l => `<span class="badge bg-blue-100 text-blue-700 px-2 py-1">${l}</span>`).join('')}
+                        </div>
+                    </div>` : ''}
+                </div>
+            </div>`;
     },
     
     showMockResult() {

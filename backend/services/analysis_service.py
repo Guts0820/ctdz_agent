@@ -68,6 +68,8 @@ class AnalysisResponse(BaseModel):
     ocr_engine: Optional[str] = None
     ocr_fallback_used: Optional[bool] = None
     ocr_status: Optional[str] = None
+    ocr_text_lines: Optional[List[dict]] = None
+    ocr_questions: Optional[List[dict]] = None
 
 def get_db():
     conn = sqlite3.connect(DATABASE)
@@ -106,6 +108,8 @@ def process_analysis(request: AnalysisRequest):
             ocr_engine=ocr_result.get("engine"),
             ocr_fallback_used=ocr_result.get("fallback_used"),
             ocr_status=status_text,
+            ocr_text_lines=ocr_result.get("text_lines") or [],
+            ocr_questions=ocr_result.get("questions") or [],
         )
     
     parse_result = simulate_parse(ocr_result)
@@ -116,6 +120,8 @@ def process_analysis(request: AnalysisRequest):
         "ocr_engine": ocr_result.get("engine"),
         "ocr_fallback_used": ocr_result.get("fallback_used"),
         "ocr_status": ocr_result.get("ocr_status", ocr_result.get("status")),
+        "ocr_text_lines": ocr_result.get("text_lines") or [],
+        "ocr_questions": ocr_result.get("questions") or [],
     })
     
     with get_db() as conn:
@@ -217,6 +223,7 @@ def rule_based_separation(markdown: str, ocr_data: dict, request: AnalysisReques
         cleaned = cleaned.replace(token, "")
 
     questions = ocr_data.get("questions") or []
+    text_lines = ocr_data.get("text_lines") or []
     if questions:
         stem = str(questions[0].get("stem", "") or "").strip()
         if stem:
@@ -224,6 +231,16 @@ def rule_based_separation(markdown: str, ocr_data: dict, request: AnalysisReques
             return {
                 "original_question": stem,
                 "student_write": rest or request.student_write or "",
+            }
+
+    # 通用 OCR 文本行：排除题目本身与纯序号，剩下的作为学生作答
+    if text_lines:
+        q_text = cleaned or request.original_question or ""
+        answer_lines = _filter_answer_lines(text_lines, q_text)
+        if answer_lines:
+            return {
+                "original_question": q_text or cleaned or "",
+                "student_write": "\n".join(answer_lines[:10]),
             }
 
     lines = [ln.strip() for ln in cleaned.splitlines() if ln.strip()]
@@ -244,6 +261,29 @@ def rule_based_separation(markdown: str, ocr_data: dict, request: AnalysisReques
                 return {"original_question": head, "student_write": tail}
 
     return {"original_question": cleaned, "student_write": request.student_write or ""}
+
+
+def _filter_answer_lines(text_lines: list, question_text: str) -> list:
+    """从 OCR 文本行中过滤出学生作答：排除题目文本、纯序号、太短的行。"""
+    q_norm = "".join(question_text.split()) if question_text else ""
+    candidates: list[str] = []
+    math_lines: list[str] = []
+    for item in text_lines:
+        text = str(item.get("text", "") or "").strip()
+        t_norm = "".join(text.split())
+        if not t_norm or len(t_norm) < 1:
+            continue
+        if q_norm and (t_norm in q_norm or q_norm in t_norm):
+            continue
+        if re.fullmatch(r"[（(]\d+[)）]", text):
+            continue
+        if re.fullmatch(r"\d+[.、．]\s*", text):
+            continue
+        if re.search(r"[=＝]|[+\-×xX*÷/]\s*\d|\d\s*[+\-×xX*÷/]", text):
+            math_lines.append(text)
+        else:
+            candidates.append(text)
+    return math_lines or candidates
 
 
 def run_ocr(request: AnalysisRequest) -> dict:
@@ -277,9 +317,19 @@ def run_ocr(request: AnalysisRequest) -> dict:
             "engine": engine,
             "fallback_used": bool(ocr_data.get("fallback_used", False)),
             "status": status,
+            "text_lines": ocr_data.get("text_lines", []),
+            "questions": ocr_data.get("questions", []),
         }
 
-    separated = separate_question_answer(markdown, ocr_data, request)
+    parsed = ocr_data.get("parsed") or {}
+    if parsed.get("original_question") or parsed.get("student_write"):
+        # 识图模型已直接给出结构化题目/作答，无需再做启发式拆分
+        separated = {
+            "original_question": str(parsed.get("original_question", "") or ""),
+            "student_write": str(parsed.get("student_write", "") or ""),
+        }
+    else:
+        separated = separate_question_answer(markdown, ocr_data, request)
     return {
         "text_status": "normal",
         "original_question": separated["original_question"] or request.original_question or markdown,
@@ -289,6 +339,8 @@ def run_ocr(request: AnalysisRequest) -> dict:
         "ocr_markdown": markdown,
         "fallback_used": bool(ocr_data.get("fallback_used", False)),
         "status": status,
+        "text_lines": ocr_data.get("text_lines", []),
+        "questions": ocr_data.get("questions", []),
     }
 
 def simulate_ocr(request: AnalysisRequest) -> dict:

@@ -194,8 +194,10 @@ def submit_homework(request: SubmitRequest):
                 "engine": analysis_result.get("ocr_engine"),
                 "fallback_used": analysis_result.get("ocr_fallback_used"),
                 "status": analysis_result.get("ocr_status"),
+                "questions": analysis_result.get("ocr_questions") or [],
+                "text_lines": analysis_result.get("ocr_text_lines") or [],
             }
-        } if analysis_result.get("ocr_markdown") is not None else {}
+        } if (analysis_result.get("ocr_markdown") is not None or analysis_result.get("ocr_text_lines")) else {}
         # OCR 未识别出内容（无文本可判题）时，直接返回可操作的提示，不再走模板化判题链路
         if analysis_result.get("judge_result") == "unknown" and not analysis_result.get("student_write"):
             return SubmitResponse(
@@ -204,6 +206,8 @@ def submit_homework(request: SubmitRequest):
                     **ocr_data,
                     "judge_result": "unknown",
                     "ocr_status": analysis_result.get("ocr_status", "ocr_unavailable"),
+                    "original_question": analysis_result.get("original_question") or "",
+                    "student_write": analysis_result.get("student_write") or "",
                     "step_feedback": analysis_result.get(
                         "step_feedback", "未能识别出题目或作答内容，请重新拍摄清晰照片后重试。"
                     ),
@@ -241,6 +245,8 @@ def submit_homework(request: SubmitRequest):
                 data={
                     **ocr_data,
                     "judge_result": analysis_result["judge_result"],
+                    "original_question": analysis_result.get("original_question") or "",
+                    "student_write": analysis_result.get("student_write") or "",
                     "is_copy": True,
                     "hints": guide_result.get("hints", []),
                     "explanation": "检测到疑似抄袭，请完成引导问题后重新提交",
@@ -258,6 +264,8 @@ def submit_homework(request: SubmitRequest):
                     data={
                         **ocr_data,
                         "judge_result": "correct",
+                        "original_question": analysis_result.get("original_question") or "",
+                        "student_write": analysis_result.get("student_write") or "",
                         "step_feedback": analysis_result["step_feedback"],
                         "master_level": 1.0,
                         "next_action": "guide",
@@ -271,6 +279,8 @@ def submit_homework(request: SubmitRequest):
                 data={
                     **ocr_data,
                     "judge_result": "correct",
+                    "original_question": analysis_result.get("original_question") or "",
+                    "student_write": analysis_result.get("student_write") or "",
                     "step_feedback": analysis_result["step_feedback"],
                     "knowledge_id": knowledge_id,
                     "master_level": state_result["master_level"],
@@ -295,6 +305,8 @@ def submit_homework(request: SubmitRequest):
                 data={
                     **ocr_data,
                     "judge_result": analysis_result["judge_result"],
+                    "original_question": analysis_result.get("original_question") or "",
+                    "student_write": analysis_result.get("student_write") or "",
                     "step_feedback": analysis_result["step_feedback"],
                     "error_tags": error_analysis_result["error_tags"],
                     "knowledge_scope": error_analysis_result["knowledge_scope"],
@@ -317,6 +329,8 @@ def submit_homework(request: SubmitRequest):
         response_data = {
             **ocr_data,
             "judge_result": analysis_result["judge_result"],
+            "original_question": analysis_result.get("original_question", ""),
+            "student_write": analysis_result.get("student_write", ""),
             "step_feedback": analysis_result["step_feedback"],
             "error_step_list": analysis_result["error_step_list"],
             "miss_step_list": analysis_result["miss_step_list"],

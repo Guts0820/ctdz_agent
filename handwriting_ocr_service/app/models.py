@@ -12,6 +12,8 @@ class EngineResult:
     review_required: bool | None = None
     blocks: tuple[dict[str, object], ...] = ()
     raw_json: dict[str, object] | None = None
+    text_lines: tuple[dict[str, object], ...] = ()
+    parsed: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,8 @@ class RecognitionResult:
     blocks: tuple[dict[str, object], ...] = ()
     raw_json: dict[str, object] | None = None
     questions: tuple[dict[str, object], ...] = ()
+    text_lines: tuple[dict[str, object], ...] = ()
+    parsed: dict[str, object] | None = None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -37,4 +41,6 @@ class RecognitionResult:
             "blocks": list(self.blocks),
             "raw_json": self.raw_json,
             "questions": list(self.questions),
+            "text_lines": list(self.text_lines),
+            "parsed": self.parsed,
         }

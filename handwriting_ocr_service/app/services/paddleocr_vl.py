@@ -99,6 +99,7 @@ class PaddleOCRVLEngine:
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_layout_detection=True,
+            use_ocr_for_image_block=True,
             markdown_ignore_labels=["image"],
         )
 
@@ -283,6 +284,31 @@ class PaddleOCRVLEngine:
     def _extract_blocks(cls, page_result: Any, page_index: int) -> list[dict[str, object]]:
         if not isinstance(page_result, dict):
             return []
+
+        # 优先使用 VL 解析结果（含图片块内的手写/文本转录）
+        parsing_res_list = page_result.get("parsing_res_list")
+        if isinstance(parsing_res_list, (list, tuple)) and parsing_res_list:
+            blocks: list[dict[str, object]] = []
+            for block_index, item in enumerate(parsing_res_list, start=1):
+                if isinstance(item, dict):
+                    block_label = item.get("block_label") or item.get("label") or "unknown"
+                    block_content = item.get("block_content") or item.get("content") or ""
+                    block_bbox = item.get("block_bbox") or item.get("bbox")
+                    score = item.get("score")
+                else:
+                    block_label = getattr(item, "label", None) or "unknown"
+                    block_content = getattr(item, "content", "") or ""
+                    block_bbox = getattr(item, "block_bbox", None) or getattr(item, "bbox", None)
+                    score = getattr(item, "score", None)
+                blocks.append({
+                    "page": page_index,
+                    "index": block_index,
+                    "type": str(block_label),
+                    "score": float(score) if isinstance(score, (int, float)) else None,
+                    "text": str(block_content).strip(),
+                    "bbox": block_bbox,
+                })
+            return blocks
 
         layout_result = page_result.get("layout_det_res")
         if not isinstance(layout_result, dict):

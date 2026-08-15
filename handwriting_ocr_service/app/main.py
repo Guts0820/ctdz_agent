@@ -18,13 +18,26 @@ settings = Settings.from_env()
 
 @lru_cache
 def build_recognition_service() -> RecognitionService:
-    fallback_engine = QwenVisionEngine(settings) if settings.qwen_is_configured else None
-    return RecognitionService(
-        primary_engine=PaddleOCRVLEngine(
+    paddle_engine = PaddleOCRVLEngine(
+        device=settings.paddleocr_vl_device,
+        pipeline_version=settings.paddleocr_vl_pipeline_version,
+    )
+    qwen_engine = QwenVisionEngine(settings) if settings.qwen_is_configured else None
+    if qwen_engine is not None:
+        primary_engine = qwen_engine
+        fallback_engine = None
+        fallback_factory = lambda: PaddleOCRVLEngine(
             device=settings.paddleocr_vl_device,
             pipeline_version=settings.paddleocr_vl_pipeline_version,
-        ),
+        )
+    else:
+        primary_engine = paddle_engine
+        fallback_engine = None
+        fallback_factory = None
+    return RecognitionService(
+        primary_engine=primary_engine,
         fallback_engine=fallback_engine,
+        fallback_factory=fallback_factory,
         confidence_threshold=settings.confidence_threshold,
     )
 

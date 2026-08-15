@@ -31,15 +31,13 @@ def start_ocr_service(processes):
     ocr_dir = os.path.join(repo_root, "handwriting_ocr_service")
     ocr_python = os.path.join(ocr_dir, ".venv-vl", "Scripts", "python.exe")
     if not os.path.exists(ocr_python):
-        # 兼容旧路径：D:\ctdz_agent_backend\handwriting_ocr_service\.venv-vl
-        alt_dir = r"D:\ctdz_agent_backend\handwriting_ocr_service"
-        alt_python = os.path.join(alt_dir, ".venv-vl", "Scripts", "python.exe")
+        # 兼容旧路径：复用 D:\ctdz_agent_backend 的 OCR venv，但跑仓库内的 OCR 代码
+        alt_python = r"D:\ctdz_agent_backend\handwriting_ocr_service\.venv-vl\Scripts\python.exe"
         if os.path.exists(alt_python):
-            ocr_dir = alt_dir
             ocr_python = alt_python
-    if not os.path.exists(ocr_python):
-        print("未检测到 handwriting_ocr_service/.venv-vl，跳过 OCR 服务（主流程将回退到模拟 OCR / 文本输入）")
-        return
+        else:
+            print("未检测到 OCR 环境，跳过 OCR 服务（主流程将回退到模拟 OCR / 文本输入）")
+            return
 
     os.makedirs("backend/logs", exist_ok=True)
     log_file = open("backend/logs/OCR_Service.log", "w", encoding="utf-8")

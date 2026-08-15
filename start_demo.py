@@ -12,8 +12,11 @@ import webbrowser
 
 REPO = r"D:\ctdz_agent"
 VENV_PY = os.path.join(REPO, ".venv", "Scripts", "python.exe")
-OCR_DIR = r"D:\ctdz_agent_backend\handwriting_ocr_service"
+OCR_DIR = os.path.join(REPO, "handwriting_ocr_service")
 OCR_PY = os.path.join(OCR_DIR, ".venv-vl", "Scripts", "python.exe")
+if not os.path.exists(OCR_PY):
+    # 复用旧 OCR venv，但跑仓库内代码
+    OCR_PY = r"D:\ctdz_agent_backend\handwriting_ocr_service\.venv-vl\Scripts\python.exe"
 
 
 def kill_tree(proc):

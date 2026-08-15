@@ -1,3 +1,4 @@
+import re
 from typing import Protocol
 
 from app.models import EngineResult, RecognitionResult
@@ -13,32 +14,57 @@ class RecognitionService:
     def __init__(
         self,
         primary_engine: RecognitionEngine,
-        fallback_engine: RecognitionEngine | None,
         confidence_threshold: float,
+        fallback_engine: RecognitionEngine | None = None,
+        fallback_factory: "Callable[[], RecognitionEngine] | None" = None,
     ) -> None:
         self.primary_engine = primary_engine
         self.fallback_engine = fallback_engine
+        self._fallback_factory = fallback_factory
+        self._loaded_fallback: RecognitionEngine | None = None
         self.confidence_threshold = confidence_threshold
 
+    def _get_fallback(self) -> RecognitionEngine | None:
+        if self.fallback_engine is not None:
+            return self.fallback_engine
+        if self._loaded_fallback is None and self._fallback_factory is not None:
+            self._loaded_fallback = self._fallback_factory()
+        return self._loaded_fallback
+
     def recognize(self, image_bytes: bytes, content_type: str) -> RecognitionResult:
-        primary_result = self.primary_engine.recognize(image_bytes, content_type)
-        result = primary_result
-        fallback_used = False
+        try:
+            result = self.primary_engine.recognize(image_bytes, content_type)
+            fallback_used = False
+            primary_requires_review = (
+                result.review_required
+                if result.review_required is not None
+                else result.confidence < self.confidence_threshold
+            )
+            fallback = self._get_fallback()
+            if primary_requires_review and fallback is not None:
+                try:
+                    result = fallback.recognize(image_bytes, content_type)
+                    fallback_used = True
+                except Exception:
+                    # A failed optional fallback must not discard a usable primary result.
+                    pass
+        except Exception:
+            fallback = self._get_fallback()
+            if fallback is None:
+                raise
+            result = fallback.recognize(image_bytes, content_type)
+            fallback_used = True
 
-        primary_requires_review = (
-            primary_result.review_required
-            if primary_result.review_required is not None
-            else primary_result.confidence < self.confidence_threshold
-        )
-        if primary_requires_review and self.fallback_engine:
-            try:
-                result = self.fallback_engine.recognize(image_bytes, content_type)
-                fallback_used = True
-            except Exception:
-                # A failed optional fallback must not discard a usable local result.
-                result = primary_result
+        parsed = result.parsed or {}
+        questions: tuple[dict[str, object], ...] = ()
+        parsed_questions = parsed.get("questions") if isinstance(parsed, dict) else None
+        if isinstance(parsed_questions, list):
+            questions = tuple(parsed_questions)
+        if not questions:
+            questions = _build_questions(result.blocks)
+        if not questions:
+            questions = _build_questions_from_lines(result.text_lines)
 
-        questions = _build_questions(result.blocks)
         result_requires_review = (
             result.review_required
             if result.review_required is not None
@@ -61,6 +87,8 @@ class RecognitionService:
             blocks=result.blocks,
             raw_json=result.raw_json,
             questions=questions,
+            text_lines=result.text_lines,
+            parsed=result.parsed,
         )
 
 
@@ -80,4 +108,24 @@ def _build_questions(blocks: tuple[dict[str, object], ...]) -> tuple[dict[str, o
             "block_index": block.get("index"),
             "image_refs": [item.get("index") for item in blocks if item.get("type") == "image"],
         })
+    return tuple(questions)
+
+
+def _build_questions_from_lines(
+    text_lines: tuple[dict[str, object], ...],
+) -> tuple[dict[str, object], ...]:
+    """从全文本行中提取形如 `1. 题目` / `1、题目` 的题号行作为候选题目。"""
+    questions: list[dict[str, object]] = []
+    for item in text_lines:
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+        match = re.match(r"^(\d+)\s*[.、．]\s*(.*)$", text)
+        if match and match.group(2).strip():
+            questions.append({
+                "id": match.group(1),
+                "type": "unknown",
+                "stem": text,
+                "source": "text_line",
+            })
     return tuple(questions)
