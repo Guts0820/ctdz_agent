@@ -84,12 +84,29 @@ const Api = {
         return this.fetch('/students/class/' + encoded + '/mastery');
     },
 
+    async getClassMistakeStats(className) {
+        const encoded = encodeURIComponent(className);
+        return this.fetch('/class/' + encoded + '/mistake-stats');
+    },
+
     async getKnowledgePoints(grade, semester) {
         let params = [];
         if (grade) params.push('grade=' + grade);
         if (semester) params.push('semester=' + encodeURIComponent(semester));
         const query = params.length > 0 ? '?' + params.join('&') : '';
         return this.fetch('/knowledge_points' + query);
+    },
+
+    async getKnowledgePoint(knowledgeId) {
+        return this.fetch('/knowledge_points/' + encodeURIComponent(knowledgeId));
+    },
+
+    async getKnowledgeExplanation(knowledgeId) {
+        return this.fetch('/knowledge_points/' + encodeURIComponent(knowledgeId) + '/explanation');
+    },
+
+    async getKnowledgeDetail(knowledgeId) {
+        return this.fetch('/datahub/knowledge/' + encodeURIComponent(knowledgeId));
     },
 
     async getGrowthReport(studentId) {

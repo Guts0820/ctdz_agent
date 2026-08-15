@@ -698,10 +698,11 @@ def get_class_mistake_stats(class_name: str):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            """SELECT qkm.knowledge_id, COUNT(*) as error_count,
+            """SELECT qkm.knowledge_id, k.knowledge_name, COUNT(*) as error_count,
                       GROUP_CONCAT(DISTINCT ah.core_error_type) as error_types
                FROM answer_history ah
                JOIN question_knowledge_mapping qkm ON ah.question_id = qkm.question_id
+               LEFT JOIN knowledge k ON qkm.knowledge_id = k.knowledge_id
                WHERE ah.is_correct = 0
                GROUP BY qkm.knowledge_id
                ORDER BY error_count DESC LIMIT 5"""
@@ -712,6 +713,7 @@ def get_class_mistake_stats(class_name: str):
             "data": [
                 {
                     "knowledge_id": r["knowledge_id"],
+                    "knowledge_name": r["knowledge_name"] or r["knowledge_id"],
                     "error_count": r["error_count"],
                     "error_types": (r["error_types"] or "").split(","),
                 }

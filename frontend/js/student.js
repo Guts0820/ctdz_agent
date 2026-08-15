@@ -1,5 +1,5 @@
 const StudentPage = {
-    realData: { mistakes: null, report: null },
+    realData: { mistakes: null, report: null, learningPath: null },
     _loading: {},
 
     async loadMistakes() {
@@ -20,6 +20,17 @@ const StudentPage = {
             this.realData.report = await Api.getGrowthReport(sid);
         } catch (e) {
             this.realData.report = null;
+        }
+    },
+
+    async loadLearningPath() {
+        const user = MockData.currentUser || {};
+        const sid = user.userId || user.id || 'S-0001';
+        try {
+            const result = await Api.getLearningPath(sid);
+            this.realData.learningPath = (result && result.path) || [];
+        } catch (e) {
+            this.realData.learningPath = [];
         }
     },
 
@@ -232,14 +243,33 @@ const StudentPage = {
             });
             return;
         }
+        if (page === 'path' && this.realData.learningPath === null && !this._loading.path) {
+            this._loading.path = true;
+            content.innerHTML = '<div class="p-10 text-center text-gray-400">🛤️ 加载学习路径...</div>';
+            this.loadLearningPath().finally(() => {
+                this._loading.path = false;
+                this.navigate('path');
+            });
+            return;
+        }
 
         content.innerHTML = renderMap[page]();
-        if (page === 'home') this._loadHomeStats();
+        if (page === 'home') {
+            this._loadHomeStats();
+            if (this.realData.learningPath === null && !this._loading.path) {
+                this._loading.path = true;
+                this.loadLearningPath().finally(() => {
+                    this._loading.path = false;
+                    this.navigate('home');
+                });
+            }
+        }
         if (page === 'report') this.initReportCharts();
         if (page === 'path') this.initPathCharts();
     },
     
     renderHome() {
+        const path = this.realData.learningPath || [];
         return `
         <div class="space-y-4">
             <div onclick="StudentPage.navigate('camera')" class="card-hover bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-2xl p-5 cursor-pointer shadow-soft">
@@ -263,7 +293,7 @@ const StudentPage = {
                 <div onclick="StudentPage.navigate('path')" class="card-hover bg-white rounded-2xl p-4 cursor-pointer shadow-soft border border-gray-100">
                     <div class="text-3xl mb-2">🛤️</div>
                     <div class="font-bold">学习路径</div>
-                    <div class="text-sm text-gray-500">${MockData.learningPath.length}个学习节点</div>
+                    <div class="text-sm text-gray-500">${path.length}个学习节点</div>
                 </div>
                 <div onclick="StudentPage.navigate('report')" class="card-hover bg-white rounded-2xl p-4 cursor-pointer shadow-soft border border-gray-100">
                     <div class="text-3xl mb-2">📊</div>
@@ -283,7 +313,7 @@ const StudentPage = {
                     <span class="text-xs text-gray-400">基于你的学习情况</span>
                 </div>
                 <div class="space-y-2">
-                    ${MockData.learningPath.slice(0, 3).map(item => `
+                    ${path.slice(0, 3).map(item => `
                         <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
                             <div class="w-8 h-8 rounded-full ${item.type === 'weak' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'} flex items-center justify-center font-bold text-sm">
                                 ${item.order}
@@ -296,7 +326,7 @@ const StudentPage = {
                                 ${item.mastery_level}%
                             </span>
                         </div>
-                    `).join('')}
+                    `).join('') || '<div class="text-gray-400 text-sm text-center py-4">暂无推荐，先完成几道题吧</div>'}
                 </div>
             </div>
         </div>`;
@@ -1002,6 +1032,7 @@ const StudentPage = {
     },
     
     renderPath() {
+        const path = this.realData.learningPath || [];
         return `
         <div class="space-y-4">
             <div class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-2xl p-4">
@@ -1019,7 +1050,7 @@ const StudentPage = {
             </div>
             
             <div class="space-y-3">
-                ${MockData.learningPath.map(item => `
+                ${path.map(item => `
                     <div class="bg-white rounded-2xl p-4 shadow-soft">
                         <div class="flex items-start gap-3">
                             <div class="w-10 h-10 rounded-full ${item.type === 'weak' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'} flex items-center justify-center font-bold flex-shrink-0">
@@ -1045,14 +1076,14 @@ const StudentPage = {
                                     </div>
                                 ` : ''}
                                 
-                                ${item.questions && item.questions.length > 0 ? `
+                                ${(item.recommended_questions || item.questions || []).length > 0 ? `
                                     <div class="mt-3">
                                         <div class="text-xs font-medium text-gray-700 mb-1">📚 推荐题目</div>
                                         <div class="space-y-1">
-                                            ${item.questions.map(q => `
+                                            ${(item.recommended_questions || item.questions || []).map(q => `
                                                 <div class="text-xs bg-blue-50 p-2 rounded flex items-center gap-2">
                                                     <span class="badge bg-blue-200 text-blue-700">难度${q.difficulty}</span>
-                                                    <span class="text-gray-700">${q.text}</span>
+                                                    <span class="text-gray-700">${q.question_description || q.text}</span>
                                                 </div>
                                             `).join('')}
                                         </div>
@@ -1081,7 +1112,7 @@ const StudentPage = {
                             </div>
                         </div>
                     </div>
-                `).join('')}
+                `).join('') || '<div class="text-gray-400 text-sm text-center py-6">暂无学习路径，先完成作业或复习后生成</div>'}
             </div>
             
             <div class="bg-yellow-50 border border-yellow-200 rounded-2xl p-4">
@@ -1097,13 +1128,55 @@ const StudentPage = {
     },
     
     startLearning(knowledgeId) {
-        alert(`开始学习知识点: ${knowledgeId}\n\n将展示：\n1. 知识点讲解\n2. 推荐题目\n3. 错因解析\n\n（此功能正在开发中）`);
+        this.openKnowledgeDetail(knowledgeId);
+    },
+
+    async openKnowledgeDetail(knowledgeId) {
+        let kp = null;
+        let ex = null;
+        try {
+            kp = await Api.getKnowledgePoint(knowledgeId);
+        } catch (e) { /* 忽略，用 ID 兜底 */ }
+        try {
+            ex = await Api.getKnowledgeExplanation(knowledgeId);
+        } catch (e) { /* 讲解可能缺失 */ }
+
+        const title = (kp && (kp.knowledge_name || kp.knowledge_scope)) || knowledgeId;
+        const content = (ex && ex.content) || '暂无讲解内容';
+        const mistakes = (ex && ex.common_mistakes) || '暂无常见错误记录';
+        const points = (ex && ex.teaching_points) || '暂无教学要点';
+        const formulas = (ex && ex.key_formulas && ex.key_formulas !== '无') ? ex.key_formulas : '';
+        const desc = (kp && kp.knowledge_scope && kp.knowledge_scope !== title) ? kp.knowledge_scope : '';
+
+        App.showModal('📖 ' + title, `
+            <div class="space-y-3 max-h-[70vh] overflow-y-auto">
+                ${desc ? `<div class="text-xs text-gray-500">${desc}</div>` : ''}
+                <div>
+                    <div class="font-bold text-sm mb-1">📝 知识点讲解</div>
+                    <div class="text-sm text-gray-700 leading-relaxed whitespace-pre-line">${content}</div>
+                </div>
+                ${formulas ? `
+                    <div>
+                        <div class="font-bold text-sm mb-1">🧮 关键公式</div>
+                        <div class="text-sm text-gray-700 whitespace-pre-line">${formulas}</div>
+                    </div>
+                ` : ''}
+                <div>
+                    <div class="font-bold text-sm mb-1">⚠️ 常见错误</div>
+                    <div class="text-sm text-gray-700 whitespace-pre-line">${mistakes}</div>
+                </div>
+                <div>
+                    <div class="font-bold text-sm mb-1">💡 教学要点</div>
+                    <div class="text-sm text-gray-700 whitespace-pre-line">${points}</div>
+                </div>
+            </div>
+        `);
     },
     
     renderReport() {
         const report = this.realData.report;
-        const weak = (report && report.weak_knowledge_areas) || MockData.weakKnowledge;
-        const mastered = MockData.masteredKnowledge;
+        const weak = (report && report.weak_knowledge_areas) || [];
+        const mastered = (report && report.mastered_knowledge_areas) || [];
         return `
         <div class="space-y-4">
             <div class="gradient-primary text-white rounded-2xl p-5 shadow-soft">
@@ -1122,7 +1195,7 @@ const StudentPage = {
             <div class="bg-white rounded-2xl p-4 shadow-soft">
                 <div class="font-bold mb-3">⚠️ 薄弱知识点</div>
                 <div class="space-y-2">
-                    ${weak.map(k => `
+                    ${weak.length > 0 ? weak.map(k => `
                         <div class="p-3 bg-red-50 rounded-xl border border-red-100">
                             <div class="flex items-center justify-between mb-1">
                                 <span class="font-medium text-sm">${k.title}</span>
@@ -1139,7 +1212,7 @@ const StudentPage = {
                                 <div class="mt-2 text-xs text-orange-600">💡 累计错误 ${k.error_count} 次</div>
                             ` : '')}
                         </div>
-                    `).join('')}
+                    `).join('') : '<div class="text-gray-400 text-sm text-center py-4">暂无薄弱知识点 🎉</div>'}
                 </div>
             </div>
             
@@ -1151,12 +1224,12 @@ const StudentPage = {
             <div class="bg-white rounded-2xl p-4 shadow-soft">
                 <div class="font-bold mb-3">💪 已掌握知识点</div>
                 <div class="grid grid-cols-2 gap-2">
-                    ${mastered.map(k => `
+                    ${mastered.length > 0 ? mastered.map(k => `
                         <div class="p-2 bg-green-50 rounded-lg text-center">
                             <div class="text-sm font-medium">${k.title}</div>
                             <div class="text-xs text-green-600">${k.mastery_level}%</div>
                         </div>
-                    `).join('')}
+                    `).join('') : '<div class="text-gray-400 text-sm text-center col-span-2 py-4">暂无已掌握知识点</div>'}
                 </div>
             </div>
             
@@ -1175,7 +1248,8 @@ const StudentPage = {
     initReportCharts() {
         setTimeout(() => {
             const report = this.realData.report;
-            const dims = (report && report.five_dimension_scores) || MockData.fiveDimensionScores.dimensions;
+            const dims = (report && report.five_dimension_scores) || [];
+            if (dims.length === 0) return;
             const radarCtx = document.getElementById('radarChart');
             if (radarCtx) {
                 new Chart(radarCtx, {

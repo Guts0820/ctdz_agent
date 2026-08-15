@@ -48,3 +48,17 @@ def get_knowledge_point(knowledge_id: str):
     if not row:
         raise HTTPException(status_code=404, detail="知识点不存在")
     return dict(row)
+
+
+@router.get("/{knowledge_id}/explanation")
+def get_knowledge_point_explanation(knowledge_id: str):
+    """返回知识点讲解/常见错误/教学要点（来自 knowledge_explanations.csv）。"""
+    csv_path = Path(__file__).resolve().parents[3] / "backend" / "database" / "knowledge_explanations.csv"
+    if not csv_path.exists():
+        raise HTTPException(status_code=404, detail="讲解数据不存在")
+    import csv as _csv
+    with open(csv_path, encoding="utf-8-sig", newline="") as f:
+        for row in _csv.DictReader(f):
+            if row.get("knowledge_id") == knowledge_id:
+                return row
+    raise HTTPException(status_code=404, detail="知识点讲解不存在")

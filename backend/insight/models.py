@@ -39,6 +39,7 @@ class GrowthReportData(BaseModel):
     student_id: int
     five_dimension_scores: List[Dict]
     weak_knowledge_areas: List[Dict]
+    mastered_knowledge_areas: List[Dict]
     recent_progress: List[Dict]
     learning_path: List[LearningPathNode]
     review_plan: Optional[List[Dict]] = None

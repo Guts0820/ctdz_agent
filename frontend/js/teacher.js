@@ -3,6 +3,7 @@ const TeacherPage = {
     currentStudents: [],
     currentClassData: null,
     currentClassMastery: [],
+    currentClassMistakeStats: [],
     isLoading: false,
 
     render() {
@@ -177,10 +178,17 @@ const TeacherPage = {
         await this.loadClassData(className);
         try {
             const masteryResult = await Api.getClassMastery(className);
-            this.currentClassMastery = masteryResult.mastery_data || [];
+            this.currentClassMastery = masteryResult.data || [];
         } catch (e) {
             console.error('Failed to load class mastery:', e);
             this.currentClassMastery = [];
+        }
+        try {
+            const statsResult = await Api.getClassMistakeStats(className);
+            this.currentClassMistakeStats = statsResult.data || [];
+        } catch (e) {
+            console.error('Failed to load class mistake stats:', e);
+            this.currentClassMistakeStats = [];
         }
         
         if (content) {
@@ -228,10 +236,17 @@ const TeacherPage = {
                 await this.loadClassData(targetClass);
                 try {
                     const masteryResult = await Api.getClassMastery(targetClass);
-                    this.currentClassMastery = masteryResult.mastery_data || [];
+                    this.currentClassMastery = masteryResult.data || [];
                 } catch (e) {
                     console.error('Failed to load class mastery:', e);
                     this.currentClassMastery = [];
+                }
+                try {
+                    const statsResult = await Api.getClassMistakeStats(targetClass);
+                    this.currentClassMistakeStats = statsResult.data || [];
+                } catch (e) {
+                    console.error('Failed to load class mistake stats:', e);
+                    this.currentClassMistakeStats = [];
                 }
             }
         } catch (error) {
@@ -682,7 +697,7 @@ const TeacherPage = {
     },
 
     renderMistakes() {
-        const e = MockData.errorAnalysis;
+        const stats = this.currentClassMistakeStats || [];
 
         return `
         <div class="space-y-4 pb-4">
@@ -694,15 +709,15 @@ const TeacherPage = {
             <div class="bg-white rounded-2xl p-4 shadow-soft">
                 <div class="font-bold mb-3">⚠️ 高频错题TOP5</div>
                 <div class="space-y-2">
-                    ${MockData.getTeacherDashboard(1).highFrequencyMistakes.map((m, i) => `
+                    ${stats.length > 0 ? stats.map((m, i) => `
                         <div class="p-3 bg-red-50 rounded-xl">
                             <div class="flex items-center gap-3">
                                 <span class="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
                                     ${i + 1}
                                 </span>
                                 <div class="flex-1">
-                                    <div class="font-medium text-sm">${m.knowledge_title}</div>
-                                    <div class="text-xs text-gray-500">${m.error_name}</div>
+                                    <div class="font-medium text-sm">${m.knowledge_name || m.knowledge_id}</div>
+                                    <div class="text-xs text-gray-500">${(m.error_types || []).join('、') || '未分类'}</div>
                                 </div>
                                 <div class="text-right">
                                     <div class="text-xl font-bold text-red-600">${m.error_count}</div>
@@ -710,16 +725,16 @@ const TeacherPage = {
                                 </div>
                             </div>
                             <div class="w-full bg-white rounded-full h-1.5 mt-2">
-                                <div class="bg-red-500 h-1.5 rounded-full" style="width: ${m.error_count * 2}%"></div>
+                                <div class="bg-red-500 h-1.5 rounded-full" style="width: ${Math.min(m.error_count * 10, 100)}%"></div>
                             </div>
                             <div class="flex gap-2 mt-2">
-                                <span class="badge bg-gray-200 text-gray-600">${m.error_type}</span>
+                                <span class="badge bg-gray-200 text-gray-600">${(m.error_types || []).length > 0 ? m.error_types[0] : '未分类'}</span>
                                 <button onclick="TeacherPage.generatePractice('${m.knowledge_id}')" class="text-xs bg-purple-100 text-purple-600 px-2 rounded">
                                     生成练习
                                 </button>
                             </div>
                         </div>
-                    `).join('')}
+                    `).join('') : '<div class="text-gray-400 text-sm text-center py-4">暂无错题数据</div>'}
                 </div>
             </div>
 
@@ -732,16 +747,23 @@ const TeacherPage = {
 
     initMistakesCharts() {
         setTimeout(() => {
-            const e = MockData.errorAnalysis;
+            const stats = this.currentClassMistakeStats || [];
+            if (stats.length === 0) return;
+
+            const typeCount = {};
+            stats.forEach(m => (m.error_types || []).forEach(t => {
+                if (t) typeCount[t] = (typeCount[t] || 0) + 1;
+            }));
+            const categories = Object.keys(typeCount);
 
             const pieCtx = document.getElementById('errorPieChart');
-            if (pieCtx) {
+            if (pieCtx && categories.length > 0) {
                 new Chart(pieCtx, {
                     type: 'doughnut',
                     data: {
-                        labels: e.errorCategories.map(c => c.name),
+                        labels: categories,
                         datasets: [{
-                            data: e.errorCategories.map(c => c.count),
+                            data: categories.map(c => typeCount[c]),
                             backgroundColor: ['#f5576c', '#f093fb', '#4facfe', '#43e97b', '#fa709a']
                         }]
                     }
@@ -753,10 +775,10 @@ const TeacherPage = {
                 new Chart(barCtx, {
                     type: 'bar',
                     data: {
-                        labels: e.knowledgeErrorRanking.map(k => k.knowledge_title),
+                        labels: stats.map(k => k.knowledge_name || k.knowledge_id),
                         datasets: [{
                             label: '错误次数',
-                            data: e.knowledgeErrorRanking.map(k => k.error_count),
+                            data: stats.map(k => k.error_count),
                             backgroundColor: 'rgba(245, 87, 108, 0.7)'
                         }]
                     },
@@ -774,6 +796,7 @@ const TeacherPage = {
     },
 
     renderMastery() {
+        const classMastery = this.currentClassMastery || [];
         return `
         <div class="space-y-4 pb-4">
             <div class="bg-white rounded-2xl p-4 shadow-soft">
@@ -782,12 +805,13 @@ const TeacherPage = {
             </div>
 
             <div class="bg-white rounded-2xl p-4 shadow-soft">
-                <div class="font-bold mb-3">📊 各知识点掌握度（示例数据）</div>
+                <div class="font-bold mb-3">📊 各知识点掌握度</div>
+                ${classMastery.length === 0 ? '<div class="text-gray-400 text-sm text-center py-4">暂无数据</div>' : ''}
                 <div class="space-y-3">
-                    ${MockData.getTeacherDashboard(1).knowledgeMastery.map(k => `
+                    ${classMastery.map(k => `
                         <div class="p-3 bg-gray-50 rounded-xl">
                             <div class="flex items-center justify-between mb-1">
-                                <div class="font-medium text-sm">${k.knowledge_title}</div>
+                                <div class="font-medium text-sm">${k.knowledge_name || k.knowledge_id}</div>
                                 <div class="flex items-center gap-2">
                                     <span class="font-bold ${k.avg_mastery >= 80 ? 'text-green-600' : k.avg_mastery >= 60 ? 'text-yellow-600' : 'text-red-600'}">
                                         ${k.avg_mastery}%
@@ -807,13 +831,14 @@ const TeacherPage = {
 
             <div class="bg-white rounded-2xl p-4 shadow-soft">
                 <div class="font-bold mb-3">🎯 需重点关注的知识点</div>
+                ${classMastery.filter(k => (k.avg_mastery || 0) < 60).length === 0 ? '<div class="text-gray-400 text-sm text-center py-4">暂无薄弱知识点 🎉</div>' : ''}
                 <div class="space-y-2">
-                    ${MockData.getTeacherDashboard(1).knowledgeMastery.filter(k => k.avg_mastery < 60).map(k => `
+                    ${classMastery.filter(k => (k.avg_mastery || 0) < 60).map(k => `
                         <div class="p-3 bg-red-50 rounded-xl border border-red-100">
                             <div class="flex items-center justify-between">
                                 <div>
-                                    <div class="font-medium text-sm">${k.knowledge_title}</div>
-                                    <div class="text-xs text-red-500">班级平均掌握度较低</div>
+                                    <div class="font-medium text-sm">${k.knowledge_name || k.knowledge_id}</div>
+                                    <div class="text-xs text-red-500">班级平均掌握度 ${Math.round(k.avg_mastery || 0)}% · ${k.student_count || 0}人</div>
                                 </div>
                                 <button onclick="TeacherPage.viewDetail('${k.knowledge_id}')" class="bg-red-500 text-white text-xs px-3 py-1 rounded-lg">查看详情</button>
                             </div>
@@ -826,21 +851,22 @@ const TeacherPage = {
 
     initMasteryCharts() {
         setTimeout(() => {
-            const d = MockData.getTeacherDashboard(1);
+            const d = this.currentClassMastery || [];
+            if (d.length === 0) return;
             const ctx = document.getElementById('masteryLineChart');
             if (ctx) {
                 new Chart(ctx, {
                     type: 'line',
                     data: {
-                        labels: d.knowledgeMastery.map(k => k.knowledge_title),
+                        labels: d.map(k => k.knowledge_name || k.knowledge_id),
                         datasets: [{
                             label: '平均掌握度',
-                            data: d.knowledgeMastery.map(k => k.avg_mastery),
+                            data: d.map(k => Math.round(k.avg_mastery || 0)),
                             borderColor: '#11998e',
                             backgroundColor: 'rgba(17, 153, 142, 0.2)',
                             tension: 0.3,
                             fill: true,
-                            pointBackgroundColor: d.knowledgeMastery.map(k =>
+                            pointBackgroundColor: d.map(k =>
                                 k.avg_mastery >= 80 ? '#28a745' : k.avg_mastery >= 60 ? '#ffc107' : '#dc3545'
                             )
                         }]
@@ -853,8 +879,70 @@ const TeacherPage = {
         }, 100);
     },
 
-    viewDetail(knowledgeId) {
-        alert(`知识点 ${knowledgeId} 详情\n\n将展示：\n1. 该知识点的题目列表\n2. 学生错误详情\n3. 推荐教学方案\n\n（此功能需要对接知识图谱数据）`);
+    async viewDetail(knowledgeId) {
+        let detail = null;
+        let ex = null;
+        try {
+            detail = await Api.getKnowledgeDetail(knowledgeId);
+        } catch (e) { /* 详情可能缺失 */ }
+        try {
+            ex = await Api.getKnowledgeExplanation(knowledgeId);
+        } catch (e) { /* 讲解可能缺失 */ }
+
+        const title = (detail && detail.title) || knowledgeId;
+        const questions = (detail && detail.questions) || [];
+        const errors = (detail && detail.error_analysis) || [];
+        const prerequisites = (detail && detail.prerequisites) || [];
+        const content = (ex && ex.content) || '';
+        const points = (ex && ex.teaching_points) || '';
+
+        App.showModal('📖 ' + title + ' 详情', `
+            <div class="space-y-3 max-h-[70vh] overflow-y-auto">
+                ${content ? `
+                    <div>
+                        <div class="font-bold text-sm mb-1">📝 知识点讲解</div>
+                        <div class="text-sm text-gray-700 leading-relaxed whitespace-pre-line">${content}</div>
+                    </div>
+                ` : ''}
+                ${points ? `
+                    <div>
+                        <div class="font-bold text-sm mb-1">💡 教学要点</div>
+                        <div class="text-sm text-gray-700 whitespace-pre-line">${points}</div>
+                    </div>
+                ` : ''}
+                ${prerequisites.length > 0 ? `
+                    <div>
+                        <div class="font-bold text-sm mb-1">🔗 前置知识</div>
+                        <div class="text-sm text-gray-700">${prerequisites.join('、')}</div>
+                    </div>
+                ` : ''}
+                <div>
+                    <div class="font-bold text-sm mb-1">📚 关联题目（${questions.length}）</div>
+                    ${questions.length > 0 ? `
+                        <div class="space-y-1">
+                            ${questions.map(q => `
+                                <div class="text-xs bg-blue-50 p-2 rounded">
+                                    <span class="badge bg-blue-200 text-blue-700">难度${q.difficulty}</span>
+                                    <span class="text-gray-700">${q.question_description || q.text}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : '<div class="text-sm text-gray-400">暂无关联题目</div>'}
+                </div>
+                <div>
+                    <div class="font-bold text-sm mb-1">⚠️ 高频错因（${errors.length}）</div>
+                    ${errors.length > 0 ? `
+                        <div class="space-y-1">
+                            ${errors.map(e => `
+                                <div class="text-xs bg-red-50 p-2 rounded text-gray-700">
+                                    ${e.level1}-${e.level2}-${e.level3}（${e.occurrence_count}次）
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : '<div class="text-sm text-gray-400">暂无错因数据</div>'}
+                </div>
+            </div>
+        `);
     },
 
     reviewPlansState: {

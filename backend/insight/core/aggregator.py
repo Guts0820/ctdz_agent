@@ -86,6 +86,18 @@ class DataAggregator:
             })
         return sorted(result, key=lambda x: x["mastery_level"])
 
+    def mastered_knowledge_areas(self, user_id: int, threshold: int = 80) -> List[Dict]:
+        mastered = user_db.get_mastered_knowledge_points(user_id, threshold)
+        result = []
+        for mp in mastered:
+            title = kdb.knowledge_title(mp["knowledge_id"]) or mp["knowledge_id"]
+            result.append({
+                "knowledge_id": mp["knowledge_id"],
+                "title": title,
+                "mastery_level": mp["mastery_level"],
+            })
+        return result
+
     def recent_progress(self, user_id: int) -> List[Dict]:
         progress = user_db.get_learning_progress(user_id)
         result = []
@@ -121,6 +133,7 @@ class DataAggregator:
             student_id=user_id,
             five_dimension_scores=self.five_dimension_scores(user_id),
             weak_knowledge_areas=self.weak_knowledge_areas(user_id),
+            mastered_knowledge_areas=self.mastered_knowledge_areas(user_id),
             recent_progress=self.recent_progress(user_id),
             learning_path=path_nodes,
             review_plan=review_plan,

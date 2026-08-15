@@ -217,6 +217,14 @@ class UserDatabase:
         """, (user_id, threshold))
         return [dict(row) for row in result]
 
+    def get_mastered_knowledge_points(self, user_id, threshold=80):
+        result = self.query("""
+            SELECT * FROM learning_progress
+            WHERE user_id = ? AND mastery_level >= ?
+            ORDER BY mastery_level DESC
+        """, (user_id, threshold))
+        return [dict(row) for row in result]
+
     def add_answer_record(self, user_id, question_id, answer, is_correct, time_spent=None):
         return self.execute("""
             INSERT INTO answer_record (user_id, question_id, answer, is_correct, time_spent)
