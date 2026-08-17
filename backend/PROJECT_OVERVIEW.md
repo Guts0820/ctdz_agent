@@ -6,7 +6,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        API Gateway (8000)                       │
+│                        API Gateway (8200)                       │
 ├─────────────────────────────────────────────────────────────────┤
 │  /api/v1/submit              学生提交作业入口                    │
 │  /api/v1/student/{id}/mastery  查询学生掌握度                   │
@@ -242,6 +242,6 @@ python backend/services/state_service.py       # 8085
 python kg_service/main.py                      # 8007
 
 # 访问 API 网关
-http://localhost:8000/api/v1/submit
-http://localhost:8000/health
+http://localhost:8200/api/v1/submit
+http://localhost:8200/health
 ```

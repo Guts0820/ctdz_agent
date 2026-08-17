@@ -4,7 +4,7 @@
     python backend/verify_smoke.py
 
 全部通过时打印 PASS 并以 0 退出；任一环节失败以 1 退出。
-若 8000 端口已经有服务在跑，则直接复用现有服务做测试。
+若 8200 端口已经有服务在跑，则直接复用现有服务做测试。
 """
 
 import sys
@@ -47,7 +47,7 @@ def main():
     except Exception as exc:
         check("初始化数据库", False, str(exc))
 
-    base = "http://127.0.0.1:8000"
+    base = "http://127.0.0.1:8200"
     insight = "http://127.0.0.1:8010"
     servers = []
     already_running = False
@@ -68,7 +68,7 @@ def main():
             ("state", 8085, state_app),
             ("scheduler", 8086, scheduler_app),
             ("insight", 8010, insight_app),
-            ("gateway", 8000, gateway_app),
+            ("gateway", 8200, gateway_app),
         ]
 
         def run_server(port, app):

@@ -64,7 +64,7 @@ def main():
         ("State Service", "backend/services/state_service.py", 8085),
         ("Review Scheduler", "backend/services/review_scheduler.py", 8086),
         ("Insight Service", "backend/insight_service.py", 8010),
-        ("API Gateway", "backend/api_gateway.py", 8000)
+        ("API Gateway", "backend/api_gateway.py", 8200)
     ]
     
     processes = []

@@ -1,6 +1,6 @@
 # 小学生数学知识图谱 - 前端
 
-> **整合状态**：本前端已对接真实后端（`D:\ctdz_agent_backend` 的 API 网关 8000）。
+> **整合状态**：本前端已对接真实后端（`D:\ctdz_agent_backend` 的 API 网关 8200）。
 > 已接真实接口：登录/注册、成长报告、学习路径、错题本、复习计划、拍照 OCR 批改（PaddleOCR + DeepSeek）。
 > 教师端/管理端数据接口后端尚未提供，页面保留 mock 兜底展示。
 
@@ -17,7 +17,7 @@
 ## 2. 快速启动
 
 ### 前提条件
-后端 API 服务已启动并运行在 `http://localhost:8000`，详细说明见后端 README。
+后端 API 服务已启动并运行在 `http://localhost:8200`，详细说明见后端 README。
 
 ### 方式一：直接打开（最简单）
 
@@ -109,7 +109,7 @@ app/
 所有 API 封装在 `js/api.js` 中，基础地址为：
 
 ```javascript
-const API_BASE = 'http://127.0.0.1:8000/api';
+const API_BASE = 'http://127.0.0.1:8200/api';
 ```
 
 如需修改后端地址，编辑 `js/api.js` 第一行即可。
@@ -286,7 +286,7 @@ try {
 A: 检查浏览器控制台（F12）是否有 JavaScript 错误。常见原因：CDN 资源加载失败（Tailwind/Chart.js）。
 
 **Q: 学习路径/成长报告显示"加载失败"？**
-A: 后端服务未启动或地址不对。检查 `js/api.js` 中的 `API_BASE` 是否正确，确认后端在 `http://localhost:8000` 运行。
+A: 后端服务未启动或地址不对。检查 `js/api.js` 中的 `API_BASE` 是否正确，确认后端在 `http://localhost:8200` 运行。
 
 **Q: 复习计划生成后无法开始练习？**
 A: 确认后端 Neo4j 中已有知识点和题目数据。如果数据库为空，需要先导入数据。

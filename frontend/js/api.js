@@ -1,4 +1,5 @@
-const API_BASE = 'http://127.0.0.1:8000/api';
+const API_PORT = window.CTDZ_API_PORT || '8200';
+const API_BASE = 'http://127.0.0.1:' + API_PORT + '/api';
 
 const Api = {
     async fetch(endpoint, options = {}) {
@@ -31,7 +32,7 @@ const Api = {
         }
     },
 
-    // ============ 账号 API（走网关 8000 统一入口） ============
+    // ============ 账号 API（走网关统一入口） ============
 
     async login(username, password) {
         return this.fetch('/login', {

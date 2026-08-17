@@ -2,7 +2,7 @@
 
 ## 模块定位与架构
 
-本仓库是数学错题分析系统的完整项目。`frontend/` 是静态浏览器前端；`backend/api_gateway.py`（8000）接收其作业请求，依次协调分析、错因、知识、教学、状态和复习服务；各服务通过本地 HTTP 调用，并使用 SQLite 保存业务数据。`backend/all_in_one.py` 是单进程演示入口；`backend/start_all.py` 负责多进程启动，若不存在 `kg_service/` 会跳过知识图谱服务。根目录的 `handwriting_ocr_service/` 是独立的图片转 Markdown OCR 服务；分析服务会将前端 Data URL 转发给它（默认 8087）。
+本仓库是数学错题分析系统的完整项目。`frontend/` 是静态浏览器前端；`backend/api_gateway.py`（8200）接收其作业请求，依次协调分析、错因、知识、教学、状态和复习服务；各服务通过本地 HTTP 调用，并使用 SQLite 保存业务数据。`backend/all_in_one.py` 是单进程演示入口；`backend/start_all.py` 负责多进程启动，若不存在 `kg_service/` 会跳过知识图谱服务。根目录的 `handwriting_ocr_service/` 是独立的图片转 Markdown OCR 服务；分析服务会将前端 Data URL 转发给它（默认 8087）。
 
 ## 项目结构
 
@@ -19,7 +19,7 @@
 
 ```powershell
 python backend/database/init_db.py   # 初始化 SQLite 数据
-python backend/all_in_one.py        # 启动单进程 API，端口 8000
+python backend/all_in_one.py        # 启动单进程 API，端口 8200
 python backend/start_all.py         # 启动多服务和 OCR；缺少 kg_service 时自动跳过
 cd frontend; python -m http.server 3000  # 启动静态前端
 ```

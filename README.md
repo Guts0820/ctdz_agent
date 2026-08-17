@@ -48,7 +48,7 @@ pip install -r requirements.txt
 DATABASE_PATH=backend/database/example_db.db
 KNOWLEDGE_CSV_PATH=backend/database/knowledge_points.csv
 API_GATEWAY_HOST=0.0.0.0
-API_GATEWAY_PORT=8000
+API_GATEWAY_PORT=8200
 ANALYSIS_SERVICE_URL=http://127.0.0.1:8081
 ERROR_ANALYSIS_SERVICE_URL=http://127.0.0.1:8082
 KNOWLEDGE_SERVICE_URL=http://127.0.0.1:8083
@@ -176,7 +176,7 @@ docker compose up --build
 
 ## 接口入口
 
-- 网关地址：`http://localhost:8000`
+- 网关地址：`http://localhost:8200`
 - 健康检查：`GET /health`
 - 提交入口：`POST /api/v1/submit`
 - 学生掌握度：`GET /api/v1/student/{student_id}/mastery`
@@ -184,7 +184,7 @@ docker compose up --build
 ## 提交接口示例
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/submit \
+curl -X POST http://127.0.0.1:8200/api/v1/submit \
   -H "Content-Type: application/json" \
   -d '{
     "student_id": "S-0001",

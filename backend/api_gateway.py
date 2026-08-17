@@ -21,6 +21,8 @@ from backend.config import (
     DATABASE_PATH,
     service_urls,
     INSIGHT_SERVICE_URL,
+    API_GATEWAY_HOST,
+    API_GATEWAY_PORT,
     HTTP_TIMEOUT_SECONDS,
     OCR_TIMEOUT_SECONDS,
     SERVICE_HEALTH_TIMEOUT_SECONDS,
@@ -755,7 +757,7 @@ async def insight_proxy(path: str, request: Request):
     """统一 API 入口：网关本地未处理的 /api/* 请求转发到 Insight 服务（8010）。
 
     网关已注册的 /api/v1/submit、/api/v1/student/{id}/mastery 会优先匹配本地路由，
-    其余（登录/注册/错题本/报告/复习等）统一经此转发，前端只需访问 8000 一个端口。
+    其余（登录/注册/错题本/报告/复习等）统一经此转发，前端只需访问网关一个端口。
     """
     url = f"{INSIGHT_SERVICE_URL.rstrip('/')}/api/{path}"
     body = await request.body()
@@ -797,4 +799,4 @@ def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=API_GATEWAY_HOST, port=API_GATEWAY_PORT)
