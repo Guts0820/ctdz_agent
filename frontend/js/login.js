@@ -43,7 +43,7 @@ const LoginPage = {
                             <p id="password-hint" class="text-xs text-gray-500 mt-1">学生/教师密码: 123456，管理员密码: admin123</p>
                         </div>
                         
-                        <button onclick="LoginPage.login()" class="w-full gradient-primary text-white font-bold py-3 rounded-xl hover:opacity-90 transition">
+                        <button onclick="LoginPage.login()" id="login-btn" class="w-full gradient-primary text-white font-bold py-3 rounded-xl hover:opacity-90 transition">
                             登 录
                         </button>
                         
@@ -118,19 +118,55 @@ const LoginPage = {
             return;
         }
 
+        this.setLoading(true);
+        this.showError('');
         const profile = this.findAccount(accountId);
+        let lastError = null;
         try {
-            const res = await Api.login(accountId, password);
-            await this.onLoginSuccess(res, accountId, password);
-        } catch (error) {
-            // Demo 便捷：账号不存在时自动注册后再登录；生产环境应提示用户注册。
-            try {
-                await Api.register(accountId, password, profile ? profile.grade : null, null);
-                const res = await Api.login(accountId, password);
-                await this.onLoginSuccess(res, accountId, password);
-            } catch (registerError) {
-                this.showError('账号或密码错误');
+            // 服务启动是逐个拉起网关最后就绪，登录会先遇到瞬时失败，这里自动重试
+            for (let attempt = 0; attempt < 8; attempt++) {
+                try {
+                    const res = await Api.login(accountId, password);
+                    await this.onLoginSuccess(res, accountId, password);
+                    return;
+                } catch (error) {
+                    lastError = error;
+                    const status = error && error.status;
+                    const message = (error && error.message) || '';
+                    const isAuthError = status === 401 || message.indexOf('用户名或密码') >= 0;
+                    if (isAuthError) {
+                        // Demo 便捷：账号不存在时自动注册后再登录；生产环境应提示用户注册。
+                        try {
+                            await Api.register(accountId, password, profile ? profile.grade : null, null);
+                            const res = await Api.login(accountId, password);
+                            await this.onLoginSuccess(res, accountId, password);
+                            return;
+                        } catch (registerError) {
+                            this.showError('账号或密码错误');
+                            return;
+                        }
+                    }
+                    const isTransient = !status || status >= 500;
+                    if (!isTransient || attempt === 7) break;
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                }
             }
+            const status = lastError && lastError.status;
+            if (!status || status >= 500) {
+                this.showError('服务正在启动，请稍候几秒再试');
+            } else {
+                this.showError((lastError && lastError.message) || '账号或密码错误');
+            }
+        } finally {
+            this.setLoading(false);
+        }
+    },
+
+    setLoading(loading) {
+        const btn = document.getElementById('login-btn');
+        if (btn) {
+            btn.disabled = loading;
+            btn.textContent = loading ? '登录中...' : '登 录';
         }
     },
 
@@ -145,9 +181,10 @@ const LoginPage = {
         const user = (res && res.user) || {};
         const account = this.findAccount(username) || {};
         const isStudent = this.selectedRole === 'student';
-        // 演示阶段：学生账号统一绑定 example_db 的演示学生 S-0001（真实答题数据所在）
+        // 数据绑定：学生答题数据统一取自 example_db 的演示学生 S-0001；
+        // 页面显示的姓名/班级/头像保持登录所选账号的资料，不做覆盖。
         const demoStudentId = isStudent ? 'S-0001' : null;
-        const baseUser = {
+        MockData.currentUser = {
             ...user,
             ...account,
             id: demoStudentId || account.id || user.id,
@@ -158,18 +195,6 @@ const LoginPage = {
             grade: account.grade != null ? account.grade : user.grade,
             class: account.class || '',
         };
-        if (isStudent) {
-            try {
-                const p = await Api.getStudent('S-0001');
-                if (p && p.student_name) {
-                    baseUser.name = p.student_name;
-                    baseUser.grade = p.student_grade || baseUser.grade;
-                    baseUser.class = p.student_class || baseUser.class;
-                    baseUser.avatar = p.student_gender === '女' ? '👧' : '👦';
-                }
-            } catch (e) { /* 后端未就绪时用账号资料兜底 */ }
-        }
-        MockData.currentUser = baseUser;
         if (this.selectedRole === 'teacher' && MockData.users.teachers[0]) {
             MockData.currentClass = MockData.users.teachers[0].classIds[0];
         }
@@ -178,6 +203,10 @@ const LoginPage = {
     
     showError(msg) {
         const errorEl = document.getElementById('login-error');
+        if (!msg) {
+            errorEl.classList.add('hidden');
+            return;
+        }
         errorEl.textContent = msg;
         errorEl.classList.remove('hidden');
     }

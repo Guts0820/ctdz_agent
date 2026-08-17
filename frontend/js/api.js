@@ -20,7 +20,9 @@ const Api = {
                         detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
                     }
                 } catch (e) { /* 非 JSON 响应，保留默认信息 */ }
-                throw new Error(detail);
+                const error = new Error(detail);
+                error.status = response.status;
+                throw error;
             }
             return await response.json();
         } catch (error) {
