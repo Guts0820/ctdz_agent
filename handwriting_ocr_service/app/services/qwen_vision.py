@@ -39,13 +39,16 @@ class QwenVisionEngine:
             "你是小学数学作业识别助手。请仔细看整张图片，把题目和学生的作答完整转录出来。\n"
             "要求：\n"
             "1. 只转录图片中可见的文字、算式、数字，不判断对错、不补全缺失内容；\n"
-            "2. 看不清的字符标注为 [不确定]；\n"
-            "3. 图片中有多道题时，questions 列出全部，original_question/student_write 取第一道题；\n"
-            "4. stem 是题目原文（不含学生填写的内容）；answer/student_write 只填学生手写或填写的数字、算式，"
+            "2. 数字与小数点务必逐字核对（0、6、8、小数点极易看混，例如 0.084 与 534.6、0.84），"
+            "不要合并不同题目或不同行的数字；\n"
+            "3. 看不清的字符标注为 [不确定]；\n"
+            "4. 图片中有多道题时，questions 列出全部，original_question/student_write 取第一道题；\n"
+            "5. stem 是题目原文（不含学生填写的内容）；answer/student_write 只填学生手写或填写的数字、算式，"
             "作答区域空着就输出空字符串，不要把题目里的括号模板当作作答；\n"
-            "4. 必须只输出严格 JSON，不要任何多余文字，格式：\n"
+            "6. raw_text 输出整张图片所有可见文字的逐行转录，用于人工对照；\n"
+            "7. 必须只输出严格 JSON，不要任何多余文字，格式：\n"
             '{"questions":[{"id":"题号","stem":"题目文本（不含学生填写内容）","answer":"学生填写的答案/作答"}],'
-            '"original_question":"第一题题目","student_write":"第一题学生作答"}'
+            '"original_question":"第一题题目","student_write":"第一题学生作答","raw_text":"整图逐行转录"}'
         )
         response = requests.post(
             f"{self._base_url}/chat/completions",
@@ -100,18 +103,20 @@ class QwenVisionEngine:
             if student_write == original_question or original_question in student_write:
                 student_write = ""
 
+        raw_text = str(parsed.get("raw_text", "") or "").strip()
         display_parts: list[str] = []
         if original_question:
             display_parts.append(f"## 题目\n\n{original_question}")
         if student_write:
             display_parts.append(f"## 学生作答\n\n{student_write}")
+        if raw_text:
+            display_parts.append(f"## 全文转录\n\n{raw_text}")
         if not display_parts:
             display_parts.append(raw_text or "（未识别到内容）")
 
+        source_lines = raw_text.splitlines() if raw_text else student_write.splitlines()
         text_lines: list[dict[str, object]] = [
-            {"text": line.strip(), "score": 1.0}
-            for line in student_write.splitlines()
-            if line.strip()
+            {"text": line.strip(), "score": 1.0} for line in source_lines if line.strip()
         ]
         if not text_lines:
             text_lines = [

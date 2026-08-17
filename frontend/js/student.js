@@ -486,13 +486,14 @@ const StudentPage = {
         }
         const isCorrect = data.judge_result === 'correct';
         const isUnknown = data.judge_result === 'unknown';
+        const hasAnswer = !!(data.student_write || '');
         const tags = (data.error_tags || []).map(t => t.level3 || t.level2 || t.level1).filter(Boolean);
         const content = document.getElementById('student-content');
         content.innerHTML = `
         <div class="space-y-4">
             <div class="${isCorrect ? 'bg-gradient-to-r from-green-500 to-emerald-600' : isUnknown ? 'bg-gradient-to-r from-amber-500 to-orange-500' : 'bg-gradient-to-r from-red-500 to-orange-500'} text-white rounded-2xl p-5 shadow-soft">
                 <div class="text-sm opacity-90">📋 批改结果</div>
-                <div class="text-2xl font-bold mt-1">${isCorrect ? '✓ 回答正确' : isUnknown ? '⚠️ 未识别到作答' : '✗ 回答错误'}</div>
+                <div class="text-2xl font-bold mt-1">${isCorrect ? '✓ 回答正确' : isUnknown ? (hasAnswer ? '⚠️ 无法自动判题' : '⚠️ 未识别到作答') : '✗ 回答错误'}</div>
                 <div class="text-xs opacity-80 mt-2">${data.step_feedback || ''}</div>
             </div>
 
@@ -539,6 +540,7 @@ const StudentPage = {
         const question = data.original_question || '';
         const answer = data.student_write || '';
         const ocr = data.ocr || {};
+        const engine = ocr.engine || data.ocr_engine || '';
         const questions = ocr.questions || [];
         const lines = (ocr.text_lines || [])
             .map(t => (typeof t === 'string' ? t : (t && t.text) || ''))
@@ -546,7 +548,10 @@ const StudentPage = {
         if (!question && !answer && lines.length === 0 && questions.length === 0) return '';
         return `
             <div class="bg-white rounded-2xl p-4 shadow-soft border border-gray-100">
-                <div class="font-bold mb-2">🔎 识别对照</div>
+                <div class="flex items-center justify-between mb-2">
+                    <div class="font-bold">🔎 识别对照</div>
+                    ${engine ? `<span class="text-xs text-gray-400">引擎：${engine}</span>` : ''}
+                </div>
                 <div class="space-y-2 text-sm">
                     <div class="p-2 bg-gray-50 rounded-lg">
                         <div class="text-xs text-gray-500 mb-1">识别到的题目</div>
