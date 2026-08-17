@@ -495,6 +495,7 @@ const StudentPage = {
                 <div class="text-sm opacity-90">📋 批改结果</div>
                 <div class="text-2xl font-bold mt-1">${isCorrect ? '✓ 回答正确' : isUnknown ? (hasAnswer ? '⚠️ 无法自动判题' : '⚠️ 未识别到作答') : '✗ 回答错误'}</div>
                 <div class="text-xs opacity-80 mt-2">${data.step_feedback || ''}</div>
+                ${data.question_added_to_bank ? '<div class="mt-2"><span class="badge bg-white/20 text-white">✅ 本题不在题库，已由系统自动判题并加入题库</span></div>' : ''}
             </div>
 
             ${this.renderOcrCompare(data)}

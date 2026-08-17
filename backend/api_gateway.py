@@ -183,6 +183,101 @@ def build_judge_prompt(question_json: dict, standard_answer: str) -> tuple[str, 
     )
     return system_prompt, user_prompt
 
+
+def judge_unknown_question_with_llm(question_text: str, student_write: str, grade: str) -> dict:
+    """题库外的题目：让 LLM 自己解题、判题并归类知识点。"""
+    system_prompt = (
+        "你是小学数学老师。这道题不在题库中，你需要：\n"
+        "1. 自己严谨地计算出正确答案（小学范围内）；\n"
+        "2. 判断学生的作答是否正确（与答案一致即 correct）；\n"
+        "3. 给题目归类一个知识点名称和一个题目类型；\n"
+        "4. 如果题目信息不完整、无法确定题意，则 judge_result 输出 unknown 并说明原因，不要编造。\n"
+        "只输出严格 JSON：\n"
+        '{"answer":"正确答案","standard_solve_steps":"标准解题步骤","knowledge_name":"知识点名称",'
+        '"question_type":"题目类型(如 计算/填空/选择/应用题)","judge_result":"correct|wrong|unknown",'
+        '"step_feedback":"针对学生作答的批改说明","error_step_list":[],"miss_step_list":[],'
+        '"core_error_type":"一级错因(计算/概念/审题/粗心)","confidence":0.95,"reason":"unknown 时说明原因"}'
+    )
+    user_prompt = json.dumps(
+        {
+            "question": question_text,
+            "student_write": student_write,
+            "grade": grade,
+        },
+        ensure_ascii=False,
+    )
+    return call_llm_json(system_prompt, user_prompt)
+
+
+def resolve_knowledge_id(knowledge_name: str) -> Optional[str]:
+    """按知识点名称在 knowledge 表中精确/模糊匹配，找不到返回 None。"""
+    if not knowledge_name:
+        return None
+    with get_db() as conn:
+        cursor = conn.cursor()
+        for sql in (
+            "SELECT knowledge_id FROM knowledge WHERE knowledge_name = ? OR knowledge_scope = ? LIMIT 1",
+            "SELECT knowledge_id FROM knowledge WHERE knowledge_name LIKE ? OR knowledge_scope LIKE ? LIMIT 1",
+        ):
+            params = (knowledge_name, knowledge_name)
+            if "LIKE" in sql:
+                params = (f"%{knowledge_name}%", f"%{knowledge_name}%")
+            cursor.execute(sql, params)
+            row = cursor.fetchone()
+            if row:
+                return row["knowledge_id"]
+    return None
+
+
+def add_question_to_bank(
+    question_text: str,
+    question_type: str,
+    standard_answer: str,
+    standard_solve_steps: str,
+    knowledge_name: str,
+    grade: str,
+) -> tuple[str, bool]:
+    """把题库外的题目写入 question 表（已存在则复用），返回 (question_id, 是否新增)。"""
+    question_text = question_text.strip()
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT question_id FROM question WHERE question_description = ? LIMIT 1",
+            (question_text,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return row["question_id"], False
+
+        question_id = generate_id("Q")
+        cursor.execute(
+            """INSERT INTO question (
+                   question_id, question_description, question_type, difficulty,
+                   grade, textbook_version, standard_solve_steps, answer, created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                question_id,
+                question_text,
+                question_type or "计算",
+                "medium",
+                grade or DEFAULT_GRADE,
+                DEFAULT_TEXTBOOK_VERSION,
+                standard_solve_steps,
+                standard_answer,
+                datetime.now().isoformat(),
+            ),
+        )
+        knowledge_id = resolve_knowledge_id(knowledge_name)
+        if knowledge_id:
+            cursor.execute(
+                """INSERT INTO question_knowledge_mapping (qkm_id, question_id, knowledge_id, mapping_weight)
+                   VALUES (?, ?, ?, ?)""",
+                (generate_id("QKM"), question_id, knowledge_id, 1.0),
+            )
+        conn.commit()
+    return question_id, True
+
+
 @app.post("/api/v1/submit", response_model=SubmitResponse)
 @timed("submit_homework")
 def submit_homework(request: SubmitRequest):
@@ -240,6 +335,40 @@ def submit_homework(request: SubmitRequest):
             except Exception as exc:
                 analysis_result["llm_fallback_reason"] = str(exc)
 
+        # 题库外题目：LLM 自解自判，并把题目加入题库（后续提交直接命中题库）
+        if not standard_answer and llm_enabled():
+            question_text = analysis_result.get("original_question") or request.original_question or ""
+            student_write = analysis_result.get("student_write") or request.student_write or ""
+            if question_text and student_write:
+                try:
+                    llm_judge = judge_unknown_question_with_llm(
+                        question_text, student_write, request.grade or DEFAULT_GRADE
+                    )
+                    if llm_judge.get("judge_result") in ("correct", "wrong"):
+                        new_question_id, added = add_question_to_bank(
+                            question_text=question_text,
+                            question_type=str(llm_judge.get("question_type") or "计算"),
+                            standard_answer=str(llm_judge.get("answer") or ""),
+                            standard_solve_steps=str(llm_judge.get("standard_solve_steps") or ""),
+                            knowledge_name=str(llm_judge.get("knowledge_name") or ""),
+                            grade=request.grade or DEFAULT_GRADE,
+                        )
+                        analysis_result.update({
+                            "judge_result": llm_judge["judge_result"],
+                            "step_feedback": llm_judge.get("step_feedback")
+                            or ("回答正确" if llm_judge["judge_result"] == "correct" else "回答错误"),
+                            "error_step_list": llm_judge.get("error_step_list") or [],
+                            "miss_step_list": llm_judge.get("miss_step_list") or [],
+                            "is_copy": False,
+                            "core_error_type": llm_judge.get("core_error_type") or "",
+                            "confidence": float(llm_judge.get("confidence") or 0.9),
+                            "question_id": new_question_id,
+                            "question_added_to_bank": added,
+                            "standard_solution": llm_judge.get("standard_solve_steps") or "",
+                        })
+                except Exception as exc:
+                    analysis_result["llm_fallback_reason"] = str(exc)
+
         if analysis_result["is_copy"]:
             guide_result = call_teaching_guide(analysis_result)
             return SubmitResponse(
@@ -268,6 +397,7 @@ def submit_homework(request: SubmitRequest):
                         "judge_result": "correct",
                         "original_question": analysis_result.get("original_question") or "",
                         "student_write": analysis_result.get("student_write") or "",
+                        "question_added_to_bank": analysis_result.get("question_added_to_bank", False),
                         "step_feedback": analysis_result["step_feedback"],
                         "master_level": 1.0,
                         "next_action": "guide",
@@ -283,6 +413,7 @@ def submit_homework(request: SubmitRequest):
                     "judge_result": "correct",
                     "original_question": analysis_result.get("original_question") or "",
                     "student_write": analysis_result.get("student_write") or "",
+                    "question_added_to_bank": analysis_result.get("question_added_to_bank", False),
                     "step_feedback": analysis_result["step_feedback"],
                     "knowledge_id": knowledge_id,
                     "master_level": state_result["master_level"],
@@ -309,6 +440,7 @@ def submit_homework(request: SubmitRequest):
                     "judge_result": analysis_result["judge_result"],
                     "original_question": analysis_result.get("original_question") or "",
                     "student_write": analysis_result.get("student_write") or "",
+                    "question_added_to_bank": analysis_result.get("question_added_to_bank", False),
                     "step_feedback": analysis_result["step_feedback"],
                     "error_tags": error_analysis_result["error_tags"],
                     "knowledge_scope": error_analysis_result["knowledge_scope"],
@@ -333,6 +465,7 @@ def submit_homework(request: SubmitRequest):
             "judge_result": analysis_result["judge_result"],
             "original_question": analysis_result.get("original_question", ""),
             "student_write": analysis_result.get("student_write", ""),
+            "question_added_to_bank": analysis_result.get("question_added_to_bank", False),
             "step_feedback": analysis_result["step_feedback"],
             "error_step_list": analysis_result["error_step_list"],
             "miss_step_list": analysis_result["miss_step_list"],

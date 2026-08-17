@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from functools import lru_cache
 from typing import Any, Dict, Optional
@@ -62,13 +63,15 @@ def call_llm(system_prompt: str, user_prompt: str, model: Optional[str] = None) 
 
 def call_llm_json(system_prompt: str, user_prompt: str, model: Optional[str] = None) -> Dict[str, Any]:
     raw = call_llm(system_prompt, user_prompt, model=model).strip()
-    if raw.startswith("```json"):
-        raw = raw[7:]
-    if raw.startswith("```"):
-        raw = raw[3:]
-    if raw.endswith("```"):
-        raw = raw[:-3]
-    parsed = json.loads(raw)
+    cleaned = re.sub(r"^```(?:json)?\s*", "", raw)
+    cleaned = re.sub(r"\s*```\s*$", "", cleaned).strip()
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r"\{[\s\S]*\}", cleaned)
+        if not match:
+            raise ValueError("LLM response is not valid JSON")
+        parsed = json.loads(match.group(0))
     if not isinstance(parsed, dict):
         raise ValueError("LLM response is not a JSON object")
     return parsed
